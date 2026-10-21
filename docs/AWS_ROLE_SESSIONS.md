@@ -82,7 +82,8 @@ Preview confirms:
 Apply uses the cutoff already recorded by preview (30 seconds after the
 15-minute preview expiry); it never computes a replacement cutoff and refuses
 to mutate after that cutoff. Before mutation it requires the same `RoleId`,
-then performs at most one `PutRolePolicy`. A timeout never
+then invokes `PutRolePolicy` with `AWS_MAX_ATTEMPTS=1` so the AWS CLI cannot
+retry the mutation internally. A timeout never
 causes a blind second call: resume is read-only and reconciles the exact policy
 name, cutoff, and document digest. A deleted and recreated role is rejected
 even if its name and ARN are reused.

@@ -116,5 +116,7 @@ Outputs:
     Value: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ObserverRoleName}
   TargetRoleName:
     Value: !Ref TargetRoleName
+  TargetRoleId:
+    Value: !GetAtt TargetRole.RoleId
   AccountId:
     Value: !Ref AWS::AccountId

@@ -154,8 +154,14 @@ class AwsExecutor:
             or not isinstance(max_session_duration, int)
         ):
             raise ExecutionError("AWS IAM role identity is incomplete")
-        expected_arn_suffix = f":iam::{target.account}:role{path}{target.resource_id}"
-        if not arn.startswith("arn:aws:") or not arn.endswith(expected_arn_suffix):
+        arn_parts = arn.split(":", 5)
+        expected_resource = f"role{path}{target.resource_id}"
+        if (
+            len(arn_parts) != 6
+            or arn_parts[:4] != ["arn", "aws", "iam", ""]
+            or arn_parts[4] != target.account
+            or arn_parts[5] != expected_resource
+        ):
             raise ExecutionError("AWS IAM role ARN does not match the exact target")
         if path.startswith(("/aws-service-role/", "/aws-reserved/sso.amazonaws.com/")):
             raise ExecutionError("AWS-managed IAM roles cannot revoke active sessions")
@@ -309,12 +315,15 @@ class AwsExecutor:
             or not isinstance(role.get("max_session_duration"), int)
         ):
             raise ExecutionError("AWS confirmed preview role identity does not match the target")
-        expected_arn_suffix = f":iam::{target.account}:role{role['path']}{target.resource_id}"
+        arn_parts = role["arn"].split(":", 5)
+        expected_resource = f"role{role['path']}{target.resource_id}"
         if (
-            not role["arn"].startswith("arn:aws:")
-            or not role["arn"].endswith(expected_arn_suffix)
+            len(arn_parts) != 6
+            or arn_parts[:4] != ["arn", "aws", "iam", ""]
+            or arn_parts[4] != target.account
+            or arn_parts[5] != expected_resource
             or not role["path"].startswith("/")
-            or role["path"].startswith("/aws-service-role/")
+            or role["path"].startswith(("/aws-service-role/", "/aws-reserved/sso.amazonaws.com/"))
             or not 3_600 <= role["max_session_duration"] <= 43_200
         ):
             raise ExecutionError("AWS confirmed preview role metadata is invalid")
@@ -488,6 +497,7 @@ class AwsExecutor:
                 ],
                 profile=self._mutation_profile,
                 expect_json=False,
+                max_attempts=1,
             )
         except AdapterError:
             pass
