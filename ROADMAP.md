@@ -15,7 +15,7 @@ The roadmap is ordered by safety prerequisites rather than feature count.
 - [x] bounded, read-only npm publication inventory
 - [x] versioned JSON Schema documents
 - [x] Windows and Linux release binaries
-- [ ] macOS release binary when a reliable runner is available
+- [ ] publish native macOS arm64/x86-64 binaries from the implemented matrix
 
 ## 0.2.0a1 — independently observed live revocation
 
@@ -28,20 +28,25 @@ The roadmap is ordered by safety prerequisites rather than feature count.
 - [x] provider-specific evidence v2 and signing-key fingerprints
 - [x] schema compatibility fixtures for v0.1 artifacts
 - [x] protected destructive provider-lab workflow
-- [ ] successful disposable GitHub and npm drill on the release commit
-- [ ] two-person review before removing the `--experimental` gate
+- [x] successful disposable GitHub and npm drill on the release commit
+- [x] remove the legacy `--experimental` gate through reviewed v0.3 changes
 
 Mutation and observation remain separate commands and credentials. No accepted
 provider request is used as closure evidence.
 
-## 0.3 — tabletop drills
+## 0.3 — guided incident response and AWS containment
 
-- [ ] disposable GitHub organization drill
-- [ ] disposable npm package drill
-- [ ] synthetic AWS OIDC and role-session lab
+- [x] provider inventory → human-confirmed incident draft
+- [x] interactive incident wizard and exact non-interactive candidate selection
+- [x] deterministic offline HTML report and execution timeline
+- [x] allow-listed AWS IAM role and GitHub OIDC trust inventory
+- [x] exact `AWSRevokeOlderSessions` mutation with independent observation
+- [x] protected disposable AWS/OIDC provider-lab workflow
+- [x] Linux arm64 and native macOS arm64/x86-64 release matrices
+- [ ] successful disposable AWS role-session drill on the release commit
 - [ ] containment SLO measurement
 - [ ] clean-machine recovery readiness checks
-- [ ] HTML report generated from signed artifacts
+- [x] retain exact preview/confirm controls without a hidden feature flag
 
 ## Additional mutation adapters: gated
 
@@ -55,9 +60,10 @@ Live mutations are not assigned a release until the project has:
 - a reviewed rollback story;
 - two-person review for every destructive provider operation.
 
-The GitHub Actions and npm token candidates are implemented experimentally.
-The next candidate, only after those adapters graduate, is an AWS role-session
-invalidation policy with a declared cutoff.
+The GitHub Actions, npm token, and AWS role-session adapters remain attended
+and exact-target only. AWS writes only the standard `AWSRevokeOlderSessions`
+inline policy to one exact role, and release publication remains gated until
+its disposable live drill passes.
 
 No generic “revoke everything” command is planned.
 

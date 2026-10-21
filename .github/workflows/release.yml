@@ -33,7 +33,7 @@ jobs:
           python-version: "3.13"
           cache: pip
 
-      - name: Verify tag, version, and main ancestry
+      - name: Verify tag, version, ancestry, and provider drills
         env:
           GH_API_TOKEN: ${{ github.token }}
         run: |
@@ -56,25 +56,28 @@ jobs:
           test "$(printf '%s' "${TAG_OBJECT}" | jq -r '.object.sha')" = "${GITHUB_SHA}"
           git fetch origin main
           git merge-base --is-ancestor "${GITHUB_SHA}" origin/main
-          LAB_RUNS="$(curl --fail --silent --show-error \
-            --header "Authorization: Bearer ${GH_API_TOKEN}" \
-            --header "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/provider-lab.yml/runs?branch=main&event=workflow_dispatch&status=success&head_sha=${GITHUB_SHA}&per_page=1")"
-          test "$(printf '%s' "${LAB_RUNS}" | jq --arg sha "${GITHUB_SHA}" \
-            '[.workflow_runs[] | select(
-              .head_sha == $sha
-              and .head_branch == "main"
-              and .event == "workflow_dispatch"
-              and .conclusion == "success"
-            )] | length')" -ge 1
+          for WORKFLOW in provider-lab.yml aws-provider-lab.yml; do
+            LAB_RUNS="$(curl --fail --silent --show-error \
+              --header "Authorization: Bearer ${GH_API_TOKEN}" \
+              --header "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/${WORKFLOW}/runs?branch=main&event=workflow_dispatch&status=success&head_sha=${GITHUB_SHA}&per_page=1")"
+            test "$(printf '%s' "${LAB_RUNS}" | jq --arg sha "${GITHUB_SHA}" \
+              '[.workflow_runs[] | select(
+                .head_sha == $sha
+                and .head_branch == "main"
+                and .event == "workflow_dispatch"
+                and .conclusion == "success"
+              )] | length')" -ge 1
+          done
 
       - name: Install release tools
-        run: python -m pip install ".[dev]" twine cyclonedx-bom
+        run: python -m pip install ".[dev]" cfn-lint twine cyclonedx-bom
 
       - name: Run quality gate
         run: |
           ruff check .
           ruff format --check .
+          cfn-lint labs/aws/cloudformation.yml
           python -m coverage run -m unittest discover -s tests -v
           python -m coverage report
           closurectl demo --dir release-gate-demo
@@ -120,9 +123,18 @@ jobs:
           - os: ubuntu-latest
             name: closurectl-linux-x86_64
             output: ./dist/closurectl-linux-x86_64
+          - os: ubuntu-24.04-arm
+            name: closurectl-linux-arm64
+            output: ./dist/closurectl-linux-arm64
           - os: windows-latest
             name: closurectl-windows-x86_64
             output: ./dist/closurectl-windows-x86_64.exe
+          - os: macos-15-intel
+            name: closurectl-macos-x86_64
+            output: ./dist/closurectl-macos-x86_64
+          - os: macos-15
+            name: closurectl-macos-arm64
+            output: ./dist/closurectl-macos-arm64
 
     steps:
       - name: Check out source
@@ -148,7 +160,8 @@ jobs:
           --distpath dist
           packaging/entrypoint.py
 
-      - name: Smoke-test executable
+      - name: Smoke-test executable on Windows
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           & '${{ matrix.output }}' --version
@@ -156,6 +169,18 @@ jobs:
           & '${{ matrix.output }}' verify frozen-demo/closure-receipt.json `
             --public-key frozen-demo/demo-public.pem `
             --graph frozen-demo/authority-graph.json `
+            --plan frozen-demo/closure-plan.json
+
+      - name: Smoke-test executable on Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          chmod +x '${{ matrix.output }}'
+          '${{ matrix.output }}' --version
+          '${{ matrix.output }}' demo --dir frozen-demo
+          '${{ matrix.output }}' verify frozen-demo/closure-receipt.json \
+            --public-key frozen-demo/demo-public.pem \
+            --graph frozen-demo/authority-graph.json \
             --plan frozen-demo/closure-plan.json
 
       - name: Upload binary
@@ -200,9 +225,18 @@ jobs:
         with:
           subject-path: release/*
 
+      - name: Determine release channel
+        id: channel
+        run: |
+          if [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "prerelease=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "prerelease=true" >> "${GITHUB_OUTPUT}"
+          fi
+
       - name: Publish release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           generate_release_notes: true
-          prerelease: true
+          prerelease: ${{ steps.channel.outputs.prerelease }}
           files: release/*

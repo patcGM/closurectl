@@ -33,7 +33,13 @@ jobs:
             python: "3.13"
           - os: ubuntu-latest
             python: "3.14"
+          - os: ubuntu-24.04-arm
+            python: "3.13"
           - os: windows-latest
+            python: "3.13"
+          - os: macos-15
+            python: "3.13"
+          - os: macos-15-intel
             python: "3.13"
 
     steps:
@@ -82,12 +88,13 @@ jobs:
           cache: pip
 
       - name: Install quality and build tools
-        run: python -m pip install build ruff twine
+        run: python -m pip install build cfn-lint ruff twine
 
       - name: Check formatting and imports
         run: |
           ruff check .
           ruff format --check .
+          cfn-lint labs/aws/cloudformation.yml
 
       - name: Build package
         run: python -m build

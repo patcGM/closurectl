@@ -2,8 +2,8 @@
 
 ## Supported versions
 
-Until the first stable release, only the latest tagged version and the current
-default branch receive security fixes.
+Only the latest tagged version and the current default branch receive security
+fixes.
 
 ## Reporting a vulnerability
 
@@ -32,6 +32,9 @@ coordinate disclosure based on impact and fix availability.
 - preview/confirmation substitution or stale-preview execution;
 - repeated mutation after a timeout or process crash;
 - observer credentials that are not independent of the mutation identity;
+- AWS role-policy substitution, stale cutoffs, or mutation/observer profiles
+  that resolve to the same principal;
+- unescaped provider metadata in generated HTML reports;
 - minimum-cut errors that incorrectly report `CLOSED`;
 - key overwrite or unsafe private-key handling;
 - provider responses being interpreted as stronger evidence than they are.
@@ -48,13 +51,17 @@ closurectl demo --dir closurectl-demo
 
 ## Security posture
 
-Version 0.2.0a1 has experimental live adapters for exact GitHub Actions
-workflow/run targets and exact npm token IDs. They are disabled unless the
-operator supplies `--experimental`, a fresh preview digest, independent
-observer/recovery credentials, and a journal path. Inventory and observation
-commands remain read-only.
+Version 0.3.0 has attended live adapters for exact GitHub Actions workflow/run,
+npm token, and AWS IAM role targets. Execution still refuses to proceed without
+a fresh preview digest, independent observer/recovery credentials, and a new
+journal path. Inventory and observation commands remain read-only.
 
 The adapters are intended for attended incident response only. Do not grant
 broader permissions than the exact disposable or incident scope requires. npm
 revocation may take up to one hour to propagate, and a provider acceptance
 response is never treated as closure evidence.
+
+The AWS adapter supports only the standard AWS partition, exact IAM role
+targets, different STS principals for mutation and observation, and the
+standard `AWSRevokeOlderSessions` policy. Release publication is blocked until
+the protected AWS provider lab passes on the exact tagged commit.

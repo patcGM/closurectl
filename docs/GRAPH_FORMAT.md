@@ -95,11 +95,20 @@ graphs stay valid. `execute`, however, rejects every contract except:
 - `github` / `cancel_run` /
   `github://OWNER/REPOSITORY/actions/runs/NUMERIC_ID`;
 - `npm` / `revoke_token` /
-  `npm://registry.npmjs.org/tokens/FULL_TOKEN_ID`.
+  `npm://registry.npmjs.org/tokens/FULL_TOKEN_ID`;
+- `aws` / `revoke_role_sessions` /
+  `aws://ACCOUNT_ID/iam/roles/ROLE_NAME`.
 
-The required phases are `stop_minting`, `cancel_pending`, and `revoke_roots`
-respectively. Human-readable aliases, workflow paths, partial token keys, and
-targets with credentials, query strings, or fragments are never executable.
+The required phases are `stop_minting`, `cancel_pending`, `revoke_roots`, and
+`revoke_descendants` respectively. Human-readable aliases, workflow paths,
+partial token keys, and targets with credentials, query strings, or fragments
+are never executable.
+
+`closurectl incident draft` can propose these edges from bounded provider
+inventories. A proposal is not authority evidence: `incident wizard` or
+`incident build --select ... --confirm DRAFT_DIGEST` must explicitly choose
+every path before a valid graph is written. Any truncated inventory adds a
+mandatory non-revocable gap.
 
 ## Enforcement phases
 
