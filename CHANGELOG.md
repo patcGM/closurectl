@@ -18,7 +18,7 @@ Initial alpha release.
 - offline compromised-maintainer demonstration;
 - read-only GitHub and npm inventory adapters;
 - English and Russian user documentation;
-- unit tests, CI, and cross-platform release workflow.
+- unit tests, CI, and Windows/Linux release binaries.
 
 ### Safety constraints
 

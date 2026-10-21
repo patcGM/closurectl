@@ -59,9 +59,10 @@ receipt: CLOSED
 
 ## Установка
 
-Готовые исполняемые файлы для Windows x86-64, Linux x86-64 и macOS находятся
-в [GitHub Releases](https://github.com/patcGM/closurectl/releases). Сравните
-SHA-256 файла со значением из `SHA256SUMS.txt`.
+Готовые исполняемые файлы для Windows x86-64 и Linux x86-64 находятся в
+[GitHub Releases](https://github.com/patcGM/closurectl/releases). Сравните
+SHA-256 файла со значением из `SHA256SUMS.txt`. На macOS пока используйте
+`pipx` или установку из исходников.
 
 ```powershell
 # Windows PowerShell
@@ -74,11 +75,6 @@ Get-FileHash .\closurectl-windows-x86_64.exe -Algorithm SHA256
 sha256sum closurectl-linux-x86_64
 chmod +x closurectl-linux-x86_64
 ./closurectl-linux-x86_64 --version
-
-# macOS
-shasum -a 256 closurectl-macos
-chmod +x closurectl-macos
-./closurectl-macos --version
 ```
 
 Бинарники пока не подписаны сертификатом разработчика и не notarized. Другой

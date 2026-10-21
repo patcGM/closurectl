@@ -75,9 +75,6 @@ jobs:
           - os: windows-latest
             name: closurectl-windows-x86_64
             output: ./dist/closurectl-windows-x86_64.exe
-          - os: macos-latest
-            name: closurectl-macos
-            output: ./dist/closurectl-macos
 
     steps:
       - name: Check out source

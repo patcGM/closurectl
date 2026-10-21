@@ -14,7 +14,8 @@ The roadmap is ordered by safety prerequisites rather than feature count.
 - [x] bounded, read-only GitHub repository inventory
 - [x] bounded, read-only npm publication inventory
 - [x] versioned JSON Schema documents
-- [x] cross-platform CI and release binaries
+- [x] Windows and Linux release binaries
+- [ ] macOS release binary when a reliable runner is available
 
 ## 0.2 — evidence adapters
 

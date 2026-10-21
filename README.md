@@ -99,8 +99,9 @@ The demo is offline. Its private key is disposable and must never be reused.
 
 Download the executable for your operating system from
 [GitHub Releases](https://github.com/patcGM/closurectl/releases). Releases
-currently provide Windows x86-64, Linux x86-64, and a binary built on GitHub's
-current macOS runner.
+currently provide Windows x86-64 and Linux x86-64. macOS users should use
+`pipx` or build from the tagged source until a reliable macOS release runner is
+available.
 
 Verify it against `SHA256SUMS.txt`:
 
@@ -111,8 +112,8 @@ Get-FileHash .\closurectl-windows-x86_64.exe -Algorithm SHA256
 ```
 
 ```bash
-# Linux/macOS
-sha256sum closurectl-linux-x86_64  # use shasum -a 256 on macOS
+# Linux
+sha256sum closurectl-linux-x86_64
 chmod +x closurectl-linux-x86_64
 ./closurectl-linux-x86_64 --version
 ```
