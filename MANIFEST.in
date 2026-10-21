@@ -8,4 +8,6 @@ include ROADMAP.md
 include SECURITY.md
 recursive-include docs *.md
 recursive-include packaging *.py
+recursive-include requirements *.txt
 recursive-include schemas *.json
+recursive-include tests/fixtures *.json

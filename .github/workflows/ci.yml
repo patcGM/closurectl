@@ -9,6 +9,9 @@ on:
 permissions:
   contents: read
 
+env:
+  PIP_CONSTRAINT: requirements/release-constraints.txt
+
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -50,7 +53,9 @@ jobs:
         run: python -m compileall -q src
 
       - name: Run tests
-        run: python -m unittest discover -s tests -v
+        run: |
+          python -m coverage run -m unittest discover -s tests -v
+          python -m coverage report
 
       - name: Run offline demo
         run: closurectl demo --dir ci-demo
@@ -102,3 +107,19 @@ jobs:
           python -m venv .sdist-venv
           .sdist-venv/bin/python -m pip install dist/*.tar.gz
           .sdist-venv/bin/closurectl --version
+          .sdist-venv/bin/closurectl demo --dir sdist-demo
+          .sdist-venv/bin/closurectl verify sdist-demo/closure-receipt.json \
+            --public-key sdist-demo/demo-public.pem \
+            --graph sdist-demo/authority-graph.json \
+            --plan sdist-demo/closure-plan.json
+
+      - name: Check generated artifacts for leaked test credentials
+        shell: python
+        run: |
+          from pathlib import Path
+
+          forbidden = ("do-not-persist", "plaintext-should-never-appear", "npm_partial_key")
+          for root in (Path("wheel-demo"), Path("sdist-demo")):
+              for path in root.rglob("*.json"):
+                  content = path.read_text(encoding="utf-8")
+                  assert not any(value in content for value in forbidden), path

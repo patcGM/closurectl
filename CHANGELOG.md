@@ -3,6 +3,31 @@
 All notable changes are documented here. The project follows Semantic
 Versioning after the first public release.
 
+## 0.2.0a1 — 2026-10-21
+
+Experimental live-revocation alpha.
+
+### Added
+
+- immutable 15-minute execution previews bound to graph and plan digests;
+- exact GitHub workflow disable and workflow-run cancellation;
+- exact npm token-ID revocation using separate mutation and recovery configs;
+- append-only, hash-chained execution journals with safe resume/reconciliation;
+- independent provider evidence v2 and Ed25519 key fingerprints;
+- v0.1 compatibility fixtures and new preview/journal/evidence schemas;
+- coverage, pinned release constraints, SBOM generation, artifact attestations,
+  and a protected destructive provider-lab workflow.
+
+### Safety constraints
+
+- live mutations require `--experimental` and exact preview confirmation;
+- GitHub mutation/observation use different accounts;
+- npm mutation/recovery configs must contain different credential material;
+- timeout and crash recovery reconcile before retrying;
+- failed or indeterminate actions stop later phases;
+- npm closure remains indeterminate during its one-hour propagation window;
+- no generic revoke-all operation and no automatic rollback.
+
 ## 0.1.0 — 2026-10-21
 
 Initial alpha release.

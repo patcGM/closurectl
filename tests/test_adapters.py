@@ -1,22 +1,35 @@
 from __future__ import annotations
 
+import io
 import json
+import os
 import unittest
 import urllib.error
 import urllib.request
 from unittest.mock import patch
 
 from closurectl.adapters.github import (
+    GitHubClient,
     GitHubResponse,
     _https_origin,
     _SameOriginRedirectHandler,
     collect_github_inventory,
 )
-from closurectl.adapters.npm import collect_npm_inventory
+from closurectl.adapters.npm import _run_npm, collect_npm_inventory
 from closurectl.errors import AdapterError
 
 
 class AdapterTests(unittest.TestCase):
+    @staticmethod
+    def _http_error(code: int) -> urllib.error.HTTPError:
+        return urllib.error.HTTPError(
+            "https://api.github.test/user",
+            code,
+            "provider failure",
+            {},
+            io.BytesIO(b"{}"),
+        )
+
     def test_github_api_requires_https(self) -> None:
         with self.assertRaisesRegex(AdapterError, "must be HTTPS"):
             _https_origin("http://api.github.test")
@@ -34,6 +47,37 @@ class AdapterTests(unittest.TestCase):
                 "https://attacker.invalid/collect",
             )
         raised.exception.close()
+
+    def test_github_rate_limit_and_server_errors_fail_closed(self) -> None:
+        client = GitHubClient("credential", api_url="https://api.github.test")
+        for status in (429, 500):
+            with self.subTest(status=status):
+                error = self._http_error(status)
+                try:
+                    with patch.object(client._opener, "open", side_effect=error):
+                        with self.assertRaisesRegex(AdapterError, f"HTTP {status}"):
+                            client.get("/user")
+                finally:
+                    error.close()
+
+    def test_github_malformed_json_fails_closed(self) -> None:
+        class Response:
+            status = 200
+            headers: dict[str, str] = {}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return b"{not-json"
+
+        client = GitHubClient("credential", api_url="https://api.github.test")
+        with patch.object(client._opener, "open", return_value=Response()):
+            with self.assertRaisesRegex(AdapterError, "unreadable"):
+                client.get("/user")
 
     @patch("closurectl.adapters.github.GitHubClient.get")
     def test_github_inventory_allowlists_metadata(self, get) -> None:
@@ -103,6 +147,27 @@ class AdapterTests(unittest.TestCase):
         self.assertNotIn("npm_partial_key", rendered)
         self.assertNotIn("plaintext-should-never-appear", rendered)
         self.assertIn("credential-id", rendered)
+
+    @patch("closurectl.adapters.npm.subprocess.run")
+    @patch("closurectl.adapters.npm.shutil.which", return_value="npm")
+    def test_npm_child_receives_only_allowlisted_environment(self, which, run) -> None:
+        del which
+        run.return_value.returncode = 0
+        run.return_value.stdout = "{}"
+        run.return_value.stderr = ""
+        with patch.dict(
+            os.environ,
+            {
+                "GITHUB_TOKEN": "must-not-reach-npm",
+                "CLOSURECTL_GITHUB_OBSERVER_TOKEN": "also-secret",
+                "NPM_CONFIG_OTP": "one-time-code",
+            },
+        ):
+            _run_npm(["whoami", "--json"], userconfig="recovery.npmrc")
+        child_environment = run.call_args.kwargs["env"]
+        self.assertNotIn("GITHUB_TOKEN", child_environment)
+        self.assertNotIn("CLOSURECTL_GITHUB_OBSERVER_TOKEN", child_environment)
+        self.assertNotIn("NPM_CONFIG_OTP", child_environment)
 
 
 if __name__ == "__main__":

@@ -16,7 +16,8 @@ Activate the environment, then:
 python -m pip install -e ".[dev]"
 python -m ruff check .
 python -m ruff format --check .
-python -m unittest discover -s tests -v
+python -m coverage run -m unittest discover -s tests -v
+python -m coverage report
 python -m build
 closurectl demo --dir closurectl-demo
 ```
@@ -40,7 +41,7 @@ canonicalization or receipt semantics.
 
 ## Provider adapters
 
-Version 0.1 provider adapters are read-only. A new adapter must:
+Read-only provider adapters must:
 
 - pass credentials through environment or native provider tooling;
 - never accept credentials as command-line arguments;
@@ -51,7 +52,10 @@ Version 0.1 provider adapters are read-only. A new adapter must:
 - include tests showing credential material is not written.
 
 Live mutation adapters require the safety controls listed in
-[`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) and will be reviewed separately.
+[`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md), exact target and operation
+allow-lists, timeout-after-commit tests, an independent observer, a rollback
+story, and a successful disposable-provider lab. Every destructive provider
+operation requires two human reviewers.
 
 ## Commit and style guidance
 

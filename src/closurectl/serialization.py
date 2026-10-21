@@ -86,6 +86,8 @@ def read_json(path: str | Path, *, reject_secrets: bool = True) -> Any:
         raise ValidationError(
             f"invalid JSON in {path} at line {exc.lineno}, column {exc.colno}"
         ) from exc
+    except UnicodeDecodeError as exc:
+        raise ValidationError(f"JSON file is not valid UTF-8: {path}") from exc
     if reject_secrets:
         reject_secret_fields(value)
     return value

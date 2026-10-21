@@ -1,0 +1,184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/patcGM/closurectl/v0.2.0a1/schemas/execution-preview.schema.json",
+  "title": "closurectl immutable execution preview",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "created_at",
+    "expires_at",
+    "graph_digest",
+    "plan_digest",
+    "actions",
+    "preview_digest"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "graph_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "plan_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "preview_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/action"
+      }
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "operation",
+        "resource_uri",
+        "account",
+        "resource_kind",
+        "resource_id"
+      ],
+      "properties": {
+        "provider": {
+          "enum": [
+            "github",
+            "npm"
+          ]
+        },
+        "operation": {
+          "enum": [
+            "disable_workflow",
+            "cancel_run",
+            "revoke_token"
+          ]
+        },
+        "resource_uri": {
+          "type": "string",
+          "minLength": 1
+        },
+        "account": {
+          "type": "string",
+          "minLength": 1
+        },
+        "repository": {
+          "type": "string",
+          "minLength": 3
+        },
+        "resource_kind": {
+          "enum": [
+            "workflow",
+            "run",
+            "token"
+          ]
+        },
+        "resource_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action_id",
+        "edge_id",
+        "provider",
+        "operation",
+        "phase",
+        "target",
+        "target_details",
+        "provider_account",
+        "api_origin",
+        "mutation_identity",
+        "observer_identity",
+        "current_state",
+        "effect",
+        "resource"
+      ],
+      "properties": {
+        "action_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "edge_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provider": {
+          "enum": [
+            "github",
+            "npm"
+          ]
+        },
+        "operation": {
+          "enum": [
+            "disable_workflow",
+            "cancel_run",
+            "revoke_token"
+          ]
+        },
+        "phase": {
+          "enum": [
+            "stop_minting",
+            "cancel_pending",
+            "revoke_roots"
+          ]
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target_details": {
+          "$ref": "#/$defs/target"
+        },
+        "provider_account": {
+          "type": "string",
+          "minLength": 1
+        },
+        "api_origin": {
+          "type": "string",
+          "format": "uri"
+        },
+        "mutation_identity": {
+          "type": "string",
+          "minLength": 1
+        },
+        "observer_identity": {
+          "type": "string",
+          "minLength": 1
+        },
+        "current_state": {
+          "type": "string",
+          "minLength": 1
+        },
+        "effect": {
+          "type": "string",
+          "minLength": 1
+        },
+        "resource": {
+          "type": "object"
+        }
+      }
+    }
+  }
+}

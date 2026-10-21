@@ -1,0 +1,267 @@
+name: Destructive provider lab
+
+on:
+  workflow_dispatch:
+    inputs:
+      github_repository:
+        description: Disposable OWNER/REPOSITORY
+        required: true
+        type: string
+      github_workflow_id:
+        description: Exact disposable workflow numeric ID
+        required: true
+        type: string
+      github_run_id:
+        description: Exact active disposable run numeric ID
+        required: true
+        type: string
+      npm_token_id:
+        description: Exact disposable npm token ID
+        required: true
+        type: string
+      destructive_confirmation:
+        description: Type DESTROY DISPOSABLE LAB CREDENTIALS
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: destructive-provider-lab
+  cancel-in-progress: false
+
+env:
+  PIP_CONSTRAINT: requirements/release-constraints.txt
+
+jobs:
+  preview:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: provider-lab
+
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Set up Node with token IDs
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+
+      - name: Install pinned lab build
+        run: |
+          python -m pip install .
+          npm install --global npm@11.18.0
+
+      - name: Materialize isolated npm configs
+        env:
+          NPM_MUTATION_NPMRC_B64: ${{ secrets.LAB_NPM_MUTATION_NPMRC_B64 }}
+          NPM_RECOVERY_NPMRC_B64: ${{ secrets.LAB_NPM_RECOVERY_NPMRC_B64 }}
+        run: |
+          umask 077
+          printf '%s' "${NPM_MUTATION_NPMRC_B64}" | base64 --decode > "${RUNNER_TEMP}/mutation.npmrc"
+          printf '%s' "${NPM_RECOVERY_NPMRC_B64}" | base64 --decode > "${RUNNER_TEMP}/recovery.npmrc"
+          echo "CLOSURECTL_NPM_MUTATION_USERCONFIG=${RUNNER_TEMP}/mutation.npmrc" >> "${GITHUB_ENV}"
+          echo "CLOSURECTL_NPM_RECOVERY_USERCONFIG=${RUNNER_TEMP}/recovery.npmrc" >> "${GITHUB_ENV}"
+
+      - name: Build exact disposable graph and plan
+        env:
+          LAB_REPOSITORY: ${{ inputs.github_repository }}
+          LAB_WORKFLOW_ID: ${{ inputs.github_workflow_id }}
+          LAB_RUN_ID: ${{ inputs.github_run_id }}
+          LAB_NPM_TOKEN_ID: ${{ inputs.npm_token_id }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          owner, repository = os.environ["LAB_REPOSITORY"].split("/", 1)
+          graph = {
+              "schema_version": "1",
+              "title": "Disposable closurectl provider lab",
+              "nodes": [
+                  {"id": "root", "kind": "authority", "label": "Disposable compromised authority"},
+                  {"id": "sink", "kind": "effect", "label": "Disposable protected effect"},
+              ],
+              "edges": [
+                  {
+                      "id": "disable-workflow",
+                      "source": "root",
+                      "target": "sink",
+                      "kind": "can_mint",
+                      "label": "Disable disposable workflow",
+                      "revocable": True,
+                      "cost": 1,
+                      "enforcement": {
+                          "provider": "github",
+                          "operation": "disable_workflow",
+                          "target": f"github://{owner}/{repository}/actions/workflows/{os.environ['LAB_WORKFLOW_ID']}",
+                          "phase": "stop_minting",
+                      },
+                  },
+                  {
+                      "id": "cancel-run",
+                      "source": "root",
+                      "target": "sink",
+                      "kind": "pending_effect",
+                      "label": "Cancel disposable run",
+                      "revocable": True,
+                      "cost": 1,
+                      "enforcement": {
+                          "provider": "github",
+                          "operation": "cancel_run",
+                          "target": f"github://{owner}/{repository}/actions/runs/{os.environ['LAB_RUN_ID']}",
+                          "phase": "cancel_pending",
+                      },
+                  },
+                  {
+                      "id": "revoke-npm-token",
+                      "source": "root",
+                      "target": "sink",
+                      "kind": "can_publish",
+                      "label": "Revoke disposable npm token",
+                      "revocable": True,
+                      "cost": 1,
+                      "enforcement": {
+                          "provider": "npm",
+                          "operation": "revoke_token",
+                          "target": f"npm://registry.npmjs.org/tokens/{os.environ['LAB_NPM_TOKEN_ID']}",
+                          "phase": "revoke_roots",
+                      },
+                  },
+              ],
+              "roots": ["root"],
+              "sinks": ["sink"],
+          }
+          Path("lab").mkdir()
+          Path("lab/authority-graph.json").write_text(
+              json.dumps(graph, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+          closurectl plan lab/authority-graph.json --out lab/closure-plan.json
+
+      - name: Generate short-lived preview
+        env:
+          GITHUB_TOKEN: ${{ secrets.LAB_GITHUB_MUTATION_TOKEN }}
+          CLOSURECTL_GITHUB_OBSERVER_TOKEN: ${{ secrets.LAB_GITHUB_OBSERVER_TOKEN }}
+        run: |
+          closurectl execute preview \
+            lab/authority-graph.json lab/closure-plan.json \
+            --out lab/execution-preview.json --experimental
+
+      - name: Remove credential configs
+        if: always()
+        run: rm -f "${RUNNER_TEMP}/mutation.npmrc" "${RUNNER_TEMP}/recovery.npmrc"
+
+      - name: Upload preview for human review
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: provider-lab-preview-${{ github.sha }}
+          path: lab/
+          if-no-files-found: error
+          retention-days: 1
+
+  apply-and-observe:
+    needs: preview
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: provider-lab
+
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Set up Node with token IDs
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+
+      - name: Confirm destructive disposable scope
+        env:
+          CONFIRMATION: ${{ inputs.destructive_confirmation }}
+        run: test "${CONFIRMATION}" = "DESTROY DISPOSABLE LAB CREDENTIALS"
+
+      - name: Install pinned lab build
+        run: |
+          python -m pip install .
+          npm install --global npm@11.18.0
+
+      - name: Download reviewed preview
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: provider-lab-preview-${{ github.sha }}
+          path: lab
+
+      - name: Materialize isolated npm configs
+        env:
+          NPM_MUTATION_NPMRC_B64: ${{ secrets.LAB_NPM_MUTATION_NPMRC_B64 }}
+          NPM_RECOVERY_NPMRC_B64: ${{ secrets.LAB_NPM_RECOVERY_NPMRC_B64 }}
+        run: |
+          umask 077
+          printf '%s' "${NPM_MUTATION_NPMRC_B64}" | base64 --decode > "${RUNNER_TEMP}/mutation.npmrc"
+          printf '%s' "${NPM_RECOVERY_NPMRC_B64}" | base64 --decode > "${RUNNER_TEMP}/recovery.npmrc"
+          echo "CLOSURECTL_NPM_MUTATION_USERCONFIG=${RUNNER_TEMP}/mutation.npmrc" >> "${GITHUB_ENV}"
+          echo "CLOSURECTL_NPM_RECOVERY_USERCONFIG=${RUNNER_TEMP}/recovery.npmrc" >> "${GITHUB_ENV}"
+
+      - name: Apply reviewed exact mutations
+        env:
+          GITHUB_TOKEN: ${{ secrets.LAB_GITHUB_MUTATION_TOKEN }}
+          CLOSURECTL_GITHUB_OBSERVER_TOKEN: ${{ secrets.LAB_GITHUB_OBSERVER_TOKEN }}
+          NPM_CONFIG_OTP: ${{ secrets.LAB_NPM_OTP }}
+        run: |
+          PREVIEW_DIGEST="$(python -c "import json; print(json.load(open('lab/execution-preview.json'))['preview_digest'])")"
+          closurectl execute apply \
+            lab/authority-graph.json lab/closure-plan.json lab/execution-preview.json \
+            --confirm "${PREVIEW_DIGEST}" --journal lab/execution.jsonl --experimental
+
+      - name: Wait for npm propagation safety window
+        run: sleep 3600
+
+      - name: Observe independently and sign the result
+        env:
+          GITHUB_TOKEN: ${{ secrets.LAB_GITHUB_MUTATION_TOKEN }}
+          CLOSURECTL_GITHUB_OBSERVER_TOKEN: ${{ secrets.LAB_GITHUB_OBSERVER_TOKEN }}
+        run: |
+          closurectl observe \
+            lab/authority-graph.json lab/closure-plan.json lab/execution-preview.json \
+            --journal lab/execution.jsonl --out lab/evidence.json
+          closurectl keygen --private-key "${RUNNER_TEMP}/receipt-private.pem" \
+            --public-key lab/receipt-public.pem
+          closurectl receipt \
+            lab/authority-graph.json lab/closure-plan.json lab/evidence.json \
+            --private-key "${RUNNER_TEMP}/receipt-private.pem" \
+            --out lab/closure-receipt.json
+          closurectl verify lab/closure-receipt.json \
+            --public-key lab/receipt-public.pem \
+            --graph lab/authority-graph.json --plan lab/closure-plan.json
+          printf '%s\n' "${GITHUB_SHA}" > lab/tested-commit.txt
+
+      - name: Remove credential configs
+        if: always()
+        run: rm -f "${RUNNER_TEMP}/mutation.npmrc" "${RUNNER_TEMP}/recovery.npmrc"
+
+      - name: Upload secret-free evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: provider-lab-${{ github.sha }}
+          path: lab/
+          if-no-files-found: error
+          retention-days: 14

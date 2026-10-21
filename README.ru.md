@@ -11,10 +11,11 @@ containment после компрометации учётной записи р
 перекрывающий все объявленные пути к критичным операциям.
 
 > [!IMPORTANT]
-> Версия 0.1 — alpha. Она планирует и проверяет containment, но не отзывает
-> реальные доступы автоматически. Интеграции GitHub и npm работают только на
-> чтение. Статус `CLOSED` относится исключительно к объявленному графу и не
-> доказывает полное удаление атакующего.
+> Версия 0.2.0a1 — alpha. Она добавляет opt-in экспериментальные мутации для
+> конкретных GitHub Actions workflows/runs и конкретных npm token IDs.
+> Обязательны короткоживущий preview, подтверждение digest, отдельная recovery
+> identity и независимая проверка. `CLOSED` относится только к объявленному
+> графу и не доказывает полное удаление атакующего.
 
 ## Зачем это нужно
 
@@ -81,7 +82,7 @@ chmod +x closurectl-linux-x86_64
 вариант установки с привязкой к конкретному релизу:
 
 ```bash
-pipx install "git+https://github.com/patcGM/closurectl.git@v0.1.0"
+pipx install "git+https://github.com/patcGM/closurectl.git@v0.2.0a1"
 ```
 
 ## Основной процесс
@@ -141,9 +142,9 @@ closurectl inventory github `
 Remove-Item Env:GITHUB_TOKEN
 ```
 
-Собираются только разрешённые поля: permissions репозитория, workflows,
-queued runs, deploy keys и OAuth scopes. Результаты ограничены 100 объектами на
-endpoint; пустой список не считается доказательством отсутствия доступа.
+Собираются только разрешённые поля: permissions репозитория, workflows, все
+активные runs, deploy keys и OAuth scopes. Коллекции ограничены 500 объектами
+с явным флагом truncation; пустой список не доказывает отсутствие доступа.
 
 ## Инвентаризация npm
 
@@ -155,6 +156,74 @@ closurectl inventory npm `
   --package package-name `
   --out npm-inventory.json
 ```
+
+Один запуск принимает не более 50 packages и 1 000 элементов в коллекции.
+
+## Экспериментальный live revocation
+
+Запускайте мутации только с чистой машины и заранее проверенной recovery
+identity. Исполнимы только три точных контракта:
+
+- `github:disable_workflow` и target
+  `github://OWNER/REPO/actions/workflows/NUMERIC_ID`;
+- `github:cancel_run` и target
+  `github://OWNER/REPO/actions/runs/NUMERIC_ID`;
+- `npm:revoke_token` и target
+  `npm://registry.npmjs.org/tokens/FULL_TOKEN_ID`.
+
+Для GitHub нужны токены двух разных accounts:
+
+```powershell
+$env:GITHUB_TOKEN = "mutation-identity-token"
+$env:CLOSURECTL_GITHUB_OBSERVER_TOKEN = "independent-observer-token"
+```
+
+Для npm нужны два разных userconfig-файла одной npm account. Recovery config
+должен сохранять доступ после отзыва целевого token:
+
+```powershell
+$env:CLOSURECTL_NPM_MUTATION_USERCONFIG = "$HOME\.npmrc-mutation"
+$env:CLOSURECTL_NPM_RECOVERY_USERCONFIG = "$HOME\.npmrc-recovery"
+```
+
+OTP нельзя передавать аргументом CLI. Если npm требует OTP, используйте
+защищённую переменную/config npm и удалите её сразу после операции.
+
+Сначала создайте и вручную проверьте preview:
+
+```powershell
+closurectl execute preview authority-graph.json closure-plan.json `
+  --out execution-preview.json --experimental
+```
+
+После проверки immutable targets и identities подтвердите точный
+`preview_digest`:
+
+```powershell
+closurectl execute apply authority-graph.json closure-plan.json `
+  execution-preview.json --confirm PREVIEW_DIGEST `
+  --journal execution.jsonl --experimental
+```
+
+После сбоя используйте `execute resume` с теми же файлами. Resume только
+сверяет уже записанные как requested действия, не повторяет мутацию вслепую и
+не начинает новые действия по просроченному preview. После reconciliation для
+оставшихся действий создайте новый preview и новый journal. Независимое
+evidence:
+
+```powershell
+closurectl observe authority-graph.json closure-plan.json `
+  execution-preview.json --journal execution.jsonl --out evidence.json
+```
+
+Для npm `VERIFIED_CLOSED` возможен только после того, как token отсутствует по
+истечении часового окна propagation. Ответ mutation API сам по себе не является
+evidence закрытия.
+
+Exit codes: `0` — закрыто/успешно, `2` — ошибка входных данных или провайдера,
+`3` — `BLOCKED`, `4` — корректный, но не закрытый receipt, `5` — незавершённые
+execution/evidence, `130` — прерывание. Глобальный `--json` перед командой
+выводит machine-readable summary.
 
 ## Статусы
 
@@ -173,7 +242,8 @@ closurectl inventory npm `
 
 Перед реальным применением прочитайте
 [модель угроз](docs/THREAT_MODEL.md) и
-[формат графа](docs/GRAPH_FORMAT.md).
+[формат графа](docs/GRAPH_FORMAT.md), а также
+[правила работы с receipt keys](docs/RECEIPT_KEYS.md).
 
 ## Разработка
 

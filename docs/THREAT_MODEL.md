@@ -27,7 +27,7 @@ originated.
 
 ## Trust assumptions
 
-Version 0.1 assumes:
+Version 0.2.0a1 assumes:
 
 - planning and signing happen on a known-clean machine;
 - the operator has an independent recovery identity;
@@ -49,8 +49,9 @@ The model can represent authority to:
 - commit queued deployments;
 - change recovery methods.
 
-The model is provider-neutral. Provider names and operations are opaque
-metadata until a separately reviewed adapter implements them.
+The graph remains provider-neutral. Live execution recognizes only three
+reviewed provider/operation pairs and exact resource URI formats; all other
+plan actions remain descriptive metadata.
 
 ## Out of scope
 
@@ -70,8 +71,8 @@ metadata until a separately reviewed adapter implements them.
 1. **Credential-minimizing artifacts.** Artifacts reject common
    plaintext-secret field names and provider adapters allow-list returned
    metadata. This is a guardrail, not proof that arbitrary text is secret-free.
-2. **Read-only adapters in v0.1.** Inventory operations do not revoke, rotate,
-   delete, cancel, or disable resources.
+2. **Read-only commands stay read-only.** `inventory`, `plan`, `observe`, and
+   `verify` never request a provider mutation.
 3. **No silent success.** Missing checks yield `PARTIAL` or `INDETERMINATE`.
 4. **No cut through an unenforceable edge.** Non-revocable edges have
    effectively infinite cut cost.
@@ -84,6 +85,17 @@ metadata until a separately reviewed adapter implements them.
    artifact integrity and signer possession, not the truth of an observation.
 8. **Existing keys are never overwritten.** Key generation fails closed when
    either destination already exists.
+9. **Mutation requires a bound preview.** Live execution requires a fresh
+   preview digest that binds the graph, plan, immutable target, provider state,
+   mutation identity, and independent observer identity.
+10. **Unknown mutation outcome is not retried.** The append-only hash-chained
+    journal records `REQUESTED` before the provider call. Resume reconciles
+    provider state and does not blindly repeat a request.
+11. **Phases fail closed.** A failed or indeterminate action prevents later
+    containment phases from starting.
+12. **Mutation is not observation.** Only the separate observer identity can
+    produce provider evidence v2. An accepted mutation never becomes
+    `VERIFIED_CLOSED` directly.
 
 ## Closure states
 
@@ -98,19 +110,27 @@ metadata until a separately reviewed adapter implements them.
 
 These states must not be broadened beyond the receipt's declared scope.
 
-## Future mutation-adapter requirements
+## Experimental mutation envelope
 
-Before any live containment adapter can graduate from experimental status it
-must provide:
+The alpha permits only:
 
-- exact target preview and operator confirmation;
-- independent recovery/lockout checks;
-- idempotency semantics;
-- timeout reconciliation before retry;
-- a distinct observation operation;
-- an explicit provider-specific definition of denial;
-- rollback guidance where rollback is possible;
-- bounded permissions and audit logging;
-- tests against a disposable provider tenant.
+- disabling one exact GitHub Actions workflow;
+- cancelling one exact GitHub Actions run;
+- revoking one exact npm token ID at `registry.npmjs.org`.
+
+GitHub mutation and observation must use different GitHub accounts. npm
+mutation and recovery must use different userconfig files for the same account,
+with different credential material. The target token must be visible through
+the recovery config before mutation.
+
+GitHub workflow disable can be rolled back manually with the exact workflow
+enable API after the incident is understood. Run cancellation and npm token
+revocation are irreversible; the operator creates a new run or token instead.
+`closurectl` never performs automatic rollback because concurrent attacker
+activity may make it unsafe.
+
+Before these adapters graduate from experimental status they still require a
+successful protected disposable-provider drill on each release commit,
+two-person review, and maintained provider-specific fault tests.
 
 An accepted API request is not sufficient evidence of closure.

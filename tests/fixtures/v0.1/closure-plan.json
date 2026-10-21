@@ -1,0 +1,12 @@
+{
+  "schema_version": "1",
+  "title": "Closure plan: v0.1 compatibility fixture",
+  "graph_digest": "2d6c5a99bbe54e6c56da603cf6f4547b6793385f5fa22d2a9c393c008e067164",
+  "status": "BLOCKED",
+  "total_cost": 0,
+  "actions": [],
+  "blocked_path": [
+    "sink"
+  ],
+  "plan_digest": "181c4d10c6464a6a437a801698ca1d8148b60d2d16cb8e38bfcbbc2e4c8a8120"
+}

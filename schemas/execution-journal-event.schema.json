@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/patcGM/closurectl/v0.2.0a1/schemas/execution-journal-event.schema.json",
+  "title": "closurectl append-only execution journal event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "sequence",
+    "at",
+    "preview_digest",
+    "plan_digest",
+    "action_id",
+    "phase",
+    "operation",
+    "target",
+    "state",
+    "summary",
+    "reference",
+    "previous_event_digest",
+    "event_digest"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "preview_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "plan_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "action_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "phase": {
+      "enum": [
+        "stop_minting",
+        "cancel_pending",
+        "revoke_descendants",
+        "revoke_roots",
+        "verify_sinks"
+      ]
+    },
+    "operation": {
+      "enum": [
+        "github.disable_workflow",
+        "github.cancel_run",
+        "npm.revoke_token"
+      ]
+    },
+    "target": {
+      "type": "string",
+      "minLength": 1
+    },
+    "state": {
+      "enum": [
+        "PREVIEWED",
+        "REQUESTED",
+        "RECONCILING",
+        "VERIFIED",
+        "FAILED",
+        "INDETERMINATE"
+      ]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "reference": {
+      "type": "string"
+    },
+    "previous_event_digest": {
+      "type": "string",
+      "pattern": "^(|[a-f0-9]{64})$"
+    },
+    "event_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  }
+}

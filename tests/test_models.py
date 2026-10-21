@@ -57,6 +57,13 @@ class AuthorityGraphTests(unittest.TestCase):
             with self.assertRaisesRegex(ValidationError, "duplicate JSON"):
                 read_json(path)
 
+    def test_non_utf8_json_is_a_validation_error(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "invalid.json"
+            path.write_bytes(b'{"title":"\xff"}')
+            with self.assertRaisesRegex(ValidationError, "valid UTF-8"):
+                read_json(path)
+
 
 if __name__ == "__main__":
     unittest.main()

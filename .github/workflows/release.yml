@@ -7,6 +7,9 @@ on:
 permissions:
   contents: read
 
+env:
+  PIP_CONSTRAINT: requirements/release-constraints.txt
+
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
@@ -30,26 +33,59 @@ jobs:
           cache: pip
 
       - name: Verify tag, version, and main ancestry
+        env:
+          GH_API_TOKEN: ${{ github.token }}
+          LIVE_DRILL_SHA: ${{ vars.LIVE_DRILL_SHA }}
         run: |
           VERSION="$(PYTHONPATH=src python -c 'from closurectl import __version__; print(__version__)')"
           test "v${VERSION}" = "${GITHUB_REF_NAME}"
+          TAG_REF="$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer ${GH_API_TOKEN}" \
+            --header "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/ref/tags/${GITHUB_REF_NAME}")"
+          test "$(printf '%s' "${TAG_REF}" | jq -r '.object.type')" = "tag"
+          TAG_URL="$(printf '%s' "${TAG_REF}" | jq -r '.object.url')"
+          TAG_OBJECT="$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer ${GH_API_TOKEN}" \
+            --header "Accept: application/vnd.github+json" \
+            "${TAG_URL}")"
+          test "$(printf '%s' "${TAG_OBJECT}" | jq -r '.tag')" = "${GITHUB_REF_NAME}"
+          test "$(printf '%s' "${TAG_OBJECT}" | jq -r '.verification.verified')" = "true"
+          test "$(printf '%s' "${TAG_OBJECT}" | jq -r '.tagger.name')" = "patcGM"
+          test "$(printf '%s' "${TAG_OBJECT}" | jq -r '.tagger.email')" = "patcGM@users.noreply.github.com"
+          test "$(printf '%s' "${TAG_OBJECT}" | jq -r '.object.sha')" = "${GITHUB_SHA}"
           git fetch origin main
           git merge-base --is-ancestor "${GITHUB_SHA}" origin/main
+          test "${LIVE_DRILL_SHA}" = "${GITHUB_SHA}"
 
       - name: Install release tools
-        run: python -m pip install ".[dev]" twine
+        run: python -m pip install ".[dev]" twine cyclonedx-bom
 
       - name: Run quality gate
         run: |
           ruff check .
           ruff format --check .
-          python -m unittest discover -s tests -v
+          python -m coverage run -m unittest discover -s tests -v
+          python -m coverage report
           closurectl demo --dir release-gate-demo
 
       - name: Build Python distributions
         run: |
           python -m build
           python -m twine check dist/*
+          python -m pip freeze --all > dist/closurectl-build-environment.lock
+          cyclonedx-py environment \
+            --output-format JSON \
+            --output-file dist/closurectl-build-toolchain.cdx.json
+
+      - name: Smoke-test Python distributions
+        run: |
+          python -m venv .wheel-venv
+          .wheel-venv/bin/python -m pip install dist/*.whl
+          .wheel-venv/bin/closurectl demo --dir wheel-release-demo
+          python -m venv .sdist-venv
+          .sdist-venv/bin/python -m pip install dist/*.tar.gz
+          .sdist-venv/bin/closurectl demo --dir sdist-release-demo
 
       - name: Upload Python distributions
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -58,6 +94,8 @@ jobs:
           path: |
             dist/*.whl
             dist/*.tar.gz
+            dist/*.cdx.json
+            dist/*.lock
           if-no-files-found: error
 
   binary:
@@ -123,7 +161,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
+      attestations: write
       contents: write
+      id-token: write
+    environment: release
 
     steps:
       - name: Download binaries
@@ -143,6 +184,11 @@ jobs:
         run: |
           cd release
           sha256sum * > SHA256SUMS.txt
+
+      - name: Attest release artifacts
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: release/*
 
       - name: Publish release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2

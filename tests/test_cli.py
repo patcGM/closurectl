@@ -11,6 +11,52 @@ from closurectl.serialization import digest_json, read_json, write_json
 
 
 class CliTests(unittest.TestCase):
+    def test_non_utf8_input_returns_validation_exit_code(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "graph.json"
+            path.write_bytes(b"\xff")
+            errors = io.StringIO()
+            with contextlib.redirect_stderr(errors):
+                result = main(["validate", str(path)])
+        self.assertEqual(result, 2)
+        self.assertIn("valid UTF-8", errors.getvalue())
+
+    def test_blocked_plan_has_nonzero_exit_code(self) -> None:
+        graph = {
+            "schema_version": "1",
+            "title": "Unclosable authority",
+            "nodes": [
+                {"id": "root", "kind": "root", "label": "Root"},
+                {"id": "sink", "kind": "sink", "label": "Sink"},
+            ],
+            "edges": [
+                {
+                    "id": "permanent",
+                    "source": "root",
+                    "target": "sink",
+                    "kind": "permanent",
+                    "label": "Cannot revoke",
+                    "revocable": False,
+                    "cost": 1,
+                }
+            ],
+            "roots": ["root"],
+            "sinks": ["sink"],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_json(root / "graph.json", graph)
+            with contextlib.redirect_stdout(io.StringIO()):
+                result = main(
+                    [
+                        "plan",
+                        str(root / "graph.json"),
+                        "--out",
+                        str(root / "plan.json"),
+                    ]
+                )
+        self.assertEqual(result, 3)
+
     def test_demo_produces_verifiable_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             stream = io.StringIO()

@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/patcGM/closurectl/v0.2.0a1/schemas/closure-receipt-v2.schema.json",
+  "title": "closurectl signed closure receipt v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "tool",
+    "issued_at",
+    "plan_digest",
+    "graph_digest",
+    "closure_state",
+    "observations",
+    "missing_actions",
+    "scope_statement",
+    "signing_key_fingerprint",
+    "receipt_digest",
+    "signature"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "2"
+    },
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "const": "closurectl"
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "issued_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "plan_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "graph_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "closure_state": {
+      "enum": [
+        "CLOSED",
+        "PARTIAL",
+        "OPEN",
+        "INDETERMINATE",
+        "BLOCKED"
+      ]
+    },
+    "observations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "action_id",
+          "status",
+          "checked_at",
+          "summary",
+          "reference",
+          "provider",
+          "operation",
+          "target",
+          "provider_account",
+          "observer_identity",
+          "api_origin",
+          "probe_type"
+        ],
+        "properties": {
+          "action_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "enum": [
+              "VERIFIED_CLOSED",
+              "STILL_OPEN",
+              "INDETERMINATE"
+            ]
+          },
+          "checked_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reference": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string",
+            "minLength": 1
+          },
+          "operation": {
+            "type": "string",
+            "minLength": 1
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1
+          },
+          "provider_account": {
+            "type": "string",
+            "minLength": 1
+          },
+          "observer_identity": {
+            "type": "string",
+            "minLength": 1
+          },
+          "api_origin": {
+            "type": "string",
+            "format": "uri"
+          },
+          "probe_type": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "missing_actions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "scope_statement": {
+      "const": "This receipt covers only the declared graph, plan, and observations. It does not prove global attacker eviction."
+    },
+    "signing_key_fingerprint": {
+      "type": "string",
+      "pattern": "^SHA256:[a-f0-9]{64}$"
+    },
+    "receipt_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "algorithm",
+        "value"
+      ],
+      "properties": {
+        "algorithm": {
+          "const": "Ed25519"
+        },
+        "value": {
+          "type": "string",
+          "contentEncoding": "base64"
+        }
+      }
+    }
+  }
+}

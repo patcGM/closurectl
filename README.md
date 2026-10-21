@@ -15,9 +15,11 @@ effects as an authority graph. It then finds a least-cost set of enforceable
 cuts and signs the resulting observations.
 
 > [!IMPORTANT]
-> `closurectl` is alpha software. Version 0.1 plans and verifies containment; it
-> does **not** automatically revoke real credentials. Provider inventory is
-> read-only. Never interpret `CLOSED` as proof of global attacker eviction.
+> `closurectl` is alpha software. Version 0.2.0a1 adds opt-in, experimental
+> mutations for exact GitHub Actions workflows/runs and exact npm token IDs.
+> They require a short-lived preview, digest confirmation, a separate recovery
+> identity, and independent observation. Never interpret `CLOSED` as proof of
+> global attacker eviction.
 
 ## The problem
 
@@ -53,7 +55,10 @@ compromised workstation
 - signs evidence receipts with Ed25519;
 - reports `CLOSED`, `PARTIAL`, `OPEN`, `INDETERMINATE`, or `BLOCKED`;
 - collects bounded, read-only GitHub and npm metadata through explicit
-  allow-lists.
+  allow-lists;
+- experimentally disables one exact GitHub workflow, cancels one exact Actions
+  run, or revokes one exact npm token with reconciliation and an append-only
+  hash-chained journal.
 
 ## 60-second demo
 
@@ -124,7 +129,7 @@ source if your environment requires a trusted publisher identity.
 ### pipx
 
 ```bash
-pipx install "git+https://github.com/patcGM/closurectl.git@v0.1.0"
+pipx install "git+https://github.com/patcGM/closurectl.git@v0.2.0a1"
 closurectl --version
 ```
 
@@ -225,9 +230,9 @@ closurectl inventory github `
 Remove-Item Env:GITHUB_TOKEN
 ```
 
-The adapter collects allow-listed repository, workflow, queued-run, deploy-key,
-permission, and OAuth-scope metadata. Results are bounded to 100 objects per
-endpoint and absence is not treated as proof.
+The adapter collects allow-listed repository, workflow, active-run, deploy-key,
+permission, and OAuth-scope metadata. Collections are capped at 500 objects
+with an explicit truncation flag; absence is not treated as proof.
 
 ### npm
 
@@ -239,6 +244,76 @@ closurectl inventory npm \
   --package your-package \
   --out npm-inventory.json
 ```
+
+Inventory accepts at most 50 packages and 1,000 items per collection.
+
+## Experimental live revocation
+
+Do not use this flow until you have a known-good recovery identity on a clean
+machine. Only these exact contracts are executable:
+
+- `github:disable_workflow` with
+  `github://OWNER/REPO/actions/workflows/NUMERIC_ID`;
+- `github:cancel_run` with
+  `github://OWNER/REPO/actions/runs/NUMERIC_ID`;
+- `npm:revoke_token` with
+  `npm://registry.npmjs.org/tokens/FULL_TOKEN_ID`.
+
+GitHub requires credentials for two different accounts:
+
+```bash
+export GITHUB_TOKEN="mutation-identity-token"
+export CLOSURECTL_GITHUB_OBSERVER_TOKEN="independent-observer-token"
+```
+
+npm requires two different npm userconfig files for the same npm account. The
+recovery config must remain valid if the target token authenticates the
+mutation config:
+
+```bash
+export CLOSURECTL_NPM_MUTATION_USERCONFIG="$HOME/.npmrc-mutation"
+export CLOSURECTL_NPM_RECOVERY_USERCONFIG="$HOME/.npmrc-recovery"
+```
+
+Never pass an OTP in command-line arguments. If npm requires one, provide it
+through npm's protected environment/config mechanism and remove it
+immediately.
+
+Create and inspect the short-lived preview:
+
+```bash
+closurectl execute preview authority-graph.json closure-plan.json \
+  --out execution-preview.json --experimental
+```
+
+Copy `preview_digest` only after checking every immutable target and identity,
+then apply it exactly once:
+
+```bash
+closurectl execute apply authority-graph.json closure-plan.json \
+  execution-preview.json --confirm PREVIEW_DIGEST \
+  --journal execution.jsonl --experimental
+```
+
+After an interruption, use `execute resume` with the same arguments. Resume
+only reconciles actions already recorded as requested; it never blindly
+repeats one or starts a later unrequested action from an expired preview. After
+reconciliation, create a fresh preview and a new journal to continue remaining
+actions. Generate evidence with the independent identities:
+
+```bash
+closurectl observe authority-graph.json closure-plan.json \
+  execution-preview.json --journal execution.jsonl --out evidence.json
+```
+
+The npm observer will not return `VERIFIED_CLOSED` until the token remains
+absent after a one-hour propagation window. Mutation success is never accepted
+as closure evidence.
+
+Exit codes are `0` for the requested closed/success state, `2` for validation
+or provider errors, `3` for a blocked plan, `4` for a valid but non-closed
+receipt, `5` for incomplete execution/evidence, and `130` for interruption.
+Use global `--json` before the command for machine-readable command summaries.
 
 ## Security model
 
@@ -255,22 +330,26 @@ artifacts describe only declared scope.
 - replace provider incident-response procedures or professional responders.
 
 Read the full [threat model](docs/THREAT_MODEL.md) and
-[graph format](docs/GRAPH_FORMAT.md) before using real incident data.
+[graph format](docs/GRAPH_FORMAT.md), and follow the
+[receipt key guidance](docs/RECEIPT_KEYS.md) before using real incident data.
 Machine-readable formats are published in [`schemas/`](schemas/).
 
 ## Project status
 
-Version 0.1 is a safe planning and evidence foundation:
+Version 0.2.0a1 keeps the v0.1 planning foundation and adds gated live
+revocation:
 
 - authority graph validation;
 - minimum-cut planner;
 - signed receipts;
 - offline demonstration;
-- read-only GitHub/npm inventories.
+- bounded GitHub/npm inventories;
+- exact preview/confirm and resumable provider execution;
+- independent provider evidence v2 and signing-key fingerprints.
 
-Planned work is tracked in [ROADMAP.md](ROADMAP.md). Destructive provider
-actions will not be added until reconciliation, lockout prevention, and
-independent verification semantics are specified and tested.
+Live adapters remain `--experimental` until the protected disposable GitHub
+and npm lab passes on the release commit. Planned work is tracked in
+[ROADMAP.md](ROADMAP.md).
 
 ## Contributing and security reports
 

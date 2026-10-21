@@ -1,7 +1,8 @@
 # Authority graph format
 
-Authority graphs are deterministic JSON documents. Version 0.1 intentionally
-uses a small schema that can be reviewed without provider-specific code.
+Authority graphs are deterministic JSON documents. Schema version 1
+intentionally uses a small format that can be reviewed without
+provider-specific code.
 
 ## Top-level object
 
@@ -31,7 +32,7 @@ uses a small schema that can be reviewed without provider-specific code.
 }
 ```
 
-`kind` is descriptive in version 0.1. Recommended values include:
+`kind` is descriptive in schema version 1. Recommended values include:
 
 - `authority_epoch`
 - `credential_handle`
@@ -58,8 +59,8 @@ An edge represents an authority-bearing transition.
   "cost": 1,
   "enforcement": {
     "provider": "github",
-    "operation": "cancel_workflow_run",
-    "target": "release-run-handle",
+    "operation": "cancel_run",
+    "target": "github://example/project/actions/runs/123456",
     "phase": "cancel_pending"
   }
 }
@@ -83,6 +84,22 @@ A non-revocable edge omits `enforcement`:
 ```
 
 The cost of a non-revocable edge is ignored by the cut algorithm.
+
+## Executable enforcement targets
+
+Provider/operation/target remain descriptive for planning, so existing v0.1
+graphs stay valid. `execute`, however, rejects every contract except:
+
+- `github` / `disable_workflow` /
+  `github://OWNER/REPOSITORY/actions/workflows/NUMERIC_ID`;
+- `github` / `cancel_run` /
+  `github://OWNER/REPOSITORY/actions/runs/NUMERIC_ID`;
+- `npm` / `revoke_token` /
+  `npm://registry.npmjs.org/tokens/FULL_TOKEN_ID`.
+
+The required phases are `stop_minting`, `cancel_pending`, and `revoke_roots`
+respectively. Human-readable aliases, workflow paths, partial token keys, and
+targets with credentials, query strings, or fragments are never executable.
 
 ## Enforcement phases
 

@@ -17,17 +17,22 @@ The roadmap is ordered by safety prerequisites rather than feature count.
 - [x] Windows and Linux release binaries
 - [ ] macOS release binary when a reliable runner is available
 
-## 0.2 — evidence adapters
+## 0.2.0a1 — independently observed live revocation
 
-- [ ] controlled GitHub authorization-denial probe
-- [ ] GitHub queued-run reconciliation
-- [ ] npm publication-rights denial probe
-- [ ] provider-specific observation schemas
-- [ ] receipt key fingerprints and key-rotation guidance
-- [ ] schema compatibility fixtures across released versions
+- [x] exact preview and mandatory digest confirmation
+- [x] hash-chained execution journal and crash-safe reconciliation
+- [x] exact GitHub workflow disable and active-run cancellation
+- [x] exact npm token-ID revocation with a separate recovery config
+- [x] GitHub Actions state observation
+- [x] npm token-list observation with a one-hour propagation window
+- [x] provider-specific evidence v2 and signing-key fingerprints
+- [x] schema compatibility fixtures for v0.1 artifacts
+- [x] protected destructive provider-lab workflow
+- [ ] successful disposable GitHub and npm drill on the release commit
+- [ ] two-person review before removing the `--experimental` gate
 
-Evidence adapters remain read-only. They verify outcomes but do not request
-revocation.
+Mutation and observation remain separate commands and credentials. No accepted
+provider request is used as closure evidence.
 
 ## 0.3 — tabletop drills
 
@@ -38,7 +43,7 @@ revocation.
 - [ ] clean-machine recovery readiness checks
 - [ ] HTML report generated from signed artifacts
 
-## Mutation adapters: gated
+## Additional mutation adapters: gated
 
 Live mutations are not assigned a release until the project has:
 
@@ -50,12 +55,9 @@ Live mutations are not assigned a release until the project has:
 - a reviewed rollback story;
 - two-person review for every destructive provider operation.
 
-Candidate operations, after those gates:
-
-- cancel a specific GitHub Actions run;
-- disable a specific workflow;
-- revoke a specific npm publication credential;
-- apply an AWS role-session invalidation policy with a declared cutoff.
+The GitHub Actions and npm token candidates are implemented experimentally.
+The next candidate, only after those adapters graduate, is an AWS role-session
+invalidation policy with a declared cutoff.
 
 No generic “revoke everything” command is planned.
 

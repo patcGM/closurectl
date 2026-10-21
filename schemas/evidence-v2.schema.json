@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/patcGM/closurectl/v0.2.0a1/schemas/evidence-v2.schema.json",
+  "title": "closurectl provider observation evidence v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "plan_digest",
+    "observations"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "2"
+    },
+    "plan_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "observations": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/observation"
+      }
+    }
+  },
+  "$defs": {
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action_id",
+        "status",
+        "checked_at",
+        "summary",
+        "reference",
+        "provider",
+        "operation",
+        "target",
+        "provider_account",
+        "observer_identity",
+        "api_origin",
+        "probe_type"
+      ],
+      "properties": {
+        "action_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "VERIFIED_CLOSED",
+            "STILL_OPEN",
+            "INDETERMINATE"
+          ]
+        },
+        "checked_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reference": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string",
+          "minLength": 1
+        },
+        "operation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provider_account": {
+          "type": "string",
+          "minLength": 1
+        },
+        "observer_identity": {
+          "type": "string",
+          "minLength": 1
+        },
+        "api_origin": {
+          "type": "string",
+          "format": "uri"
+        },
+        "probe_type": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

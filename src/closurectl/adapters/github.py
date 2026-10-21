@@ -10,11 +10,14 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
+from .. import __version__
 from ..errors import AdapterError
 from ..receipts import utc_now
 
 REPOSITORY_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 REPOSITORY_PERMISSION_FIELDS = {"admin", "maintain", "push", "triage", "pull"}
+PAGE_SIZE = 100
+MAX_COLLECTION_ITEMS = 500
 
 
 def _https_origin(url: str) -> tuple[str, int]:
@@ -54,6 +57,7 @@ class _SameOriginRedirectHandler(urllib.request.HTTPRedirectHandler):
 class GitHubResponse:
     body: Any
     scopes: tuple[str, ...]
+    status: int = 200
 
 
 class GitHubClient:
@@ -72,20 +76,36 @@ class GitHubClient:
         self._timeout = timeout
         self._opener = urllib.request.build_opener(_SameOriginRedirectHandler())
 
-    def get(self, path: str) -> GitHubResponse:
+    @property
+    def api_url(self) -> str:
+        return self._api_url
+
+    def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        accepted_statuses: tuple[int, ...] = (200,),
+    ) -> GitHubResponse:
+        if method not in {"GET", "POST", "PUT"}:
+            raise AdapterError(f"unsupported GitHub API method: {method}")
+        if not path.startswith("/") or "://" in path:
+            raise AdapterError("GitHub API path must be origin-relative")
         request = urllib.request.Request(
             f"{self._api_url}{path}",
             headers={
                 "Accept": "application/vnd.github+json",
                 "Authorization": f"Bearer {self._credential}",
-                "User-Agent": "closurectl/0.1",
+                "User-Agent": f"closurectl/{__version__}",
                 "X-GitHub-Api-Version": "2022-11-28",
             },
-            method="GET",
+            data=b"" if method in {"POST", "PUT"} else None,
+            method=method,
         )
         try:
             with self._opener.open(request, timeout=self._timeout) as response:
-                body = json.loads(response.read().decode("utf-8"))
+                raw_body = response.read()
+                body = json.loads(raw_body.decode("utf-8")) if raw_body else None
                 scopes = tuple(
                     sorted(
                         scope.strip()
@@ -93,8 +113,18 @@ class GitHubClient:
                         if scope.strip()
                     )
                 )
-                return GitHubResponse(body=body, scopes=scopes)
+                status = int(response.status)
+                if status not in accepted_statuses:
+                    raise AdapterError(f"GitHub API returned unexpected HTTP {status}")
+                return GitHubResponse(body=body, scopes=scopes, status=status)
         except urllib.error.HTTPError as exc:
+            if exc.code in accepted_statuses:
+                raw_body = exc.read()
+                try:
+                    body = json.loads(raw_body.decode("utf-8")) if raw_body else None
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    body = None
+                return GitHubResponse(body=body, scopes=(), status=exc.code)
             if 300 <= exc.code < 400:
                 raise AdapterError(
                     "GitHub API redirect was blocked to protect credentials"
@@ -110,12 +140,64 @@ class GitHubClient:
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             raise AdapterError("GitHub API returned an unreadable response") from exc
 
+    def get(self, path: str) -> GitHubResponse:
+        return self.request("GET", path)
+
+    def post(
+        self, path: str, *, accepted_statuses: tuple[int, ...] = (200, 202, 204)
+    ) -> GitHubResponse:
+        return self.request("POST", path, accepted_statuses=accepted_statuses)
+
+    def put(
+        self, path: str, *, accepted_statuses: tuple[int, ...] = (200, 202, 204)
+    ) -> GitHubResponse:
+        return self.request("PUT", path, accepted_statuses=accepted_statuses)
+
 
 def _validate_repository(repository: str) -> str:
     if not REPOSITORY_PATTERN.fullmatch(repository):
         raise AdapterError(f"invalid repository {repository!r}; expected OWNER/REPOSITORY")
     owner, name = repository.split("/", 1)
     return f"{urllib.parse.quote(owner)}/{urllib.parse.quote(name)}"
+
+
+def _collect_pages(
+    client: GitHubClient,
+    path: str,
+    *,
+    collection_key: str | None,
+) -> tuple[list[Any], int, bool, set[str]]:
+    collected: list[Any] = []
+    scopes: set[str] = set()
+    total = 0
+    page = 1
+    while len(collected) < MAX_COLLECTION_ITEMS:
+        separator = "&" if "?" in path else "?"
+        page_path = path if page == 1 else f"{path}{separator}page={page}"
+        response = client.get(page_path)
+        scopes.update(response.scopes)
+        body = response.body
+        if collection_key is None:
+            if not isinstance(body, list):
+                raise AdapterError("GitHub collection response has an unexpected shape")
+            items = body
+            total = max(total, len(collected) + len(items))
+        else:
+            if not isinstance(body, dict) or not isinstance(body.get(collection_key), list):
+                raise AdapterError("GitHub collection response has an unexpected shape")
+            items = body[collection_key]
+            raw_total = body.get("total_count")
+            total = (
+                raw_total
+                if isinstance(raw_total, int) and not isinstance(raw_total, bool)
+                else max(total, len(collected) + len(items))
+            )
+        remaining = MAX_COLLECTION_ITEMS - len(collected)
+        collected.extend(items[:remaining])
+        if len(items) < PAGE_SIZE or len(collected) >= total:
+            break
+        page += 1
+    return collected, total, total > len(collected), scopes
 
 
 def collect_github_inventory(
@@ -146,23 +228,25 @@ def collect_github_inventory(
             raise AdapterError(f"unexpected repository response for {repository}")
         scopes.update(repo_response.scopes)
 
-        workflows_response = client.get(f"/repos/{encoded}/actions/workflows?per_page=100")
-        runs_response = client.get(f"/repos/{encoded}/actions/runs?status=queued&per_page=100")
-        keys_response = client.get(f"/repos/{encoded}/keys?per_page=100")
-        for response in (workflows_response, runs_response, keys_response):
-            scopes.update(response.scopes)
-
-        workflows_body = workflows_response.body
-        runs_body = runs_response.body
-        keys_body = keys_response.body
-        if not isinstance(workflows_body, dict) or not isinstance(
-            workflows_body.get("workflows"), list
-        ):
-            raise AdapterError(f"unexpected workflows response for {repository}")
-        if not isinstance(runs_body, dict) or not isinstance(runs_body.get("workflow_runs"), list):
-            raise AdapterError(f"unexpected runs response for {repository}")
-        if not isinstance(keys_body, list):
-            raise AdapterError(f"unexpected deploy-key response for {repository}")
+        try:
+            workflow_items, workflow_total, workflow_truncated, workflow_scopes = _collect_pages(
+                client,
+                f"/repos/{encoded}/actions/workflows?per_page={PAGE_SIZE}",
+                collection_key="workflows",
+            )
+            run_items, run_total, run_truncated, run_scopes = _collect_pages(
+                client,
+                f"/repos/{encoded}/actions/runs?per_page={PAGE_SIZE}",
+                collection_key="workflow_runs",
+            )
+            key_items, key_total, key_truncated, key_scopes = _collect_pages(
+                client,
+                f"/repos/{encoded}/keys?per_page={PAGE_SIZE}",
+                collection_key=None,
+            )
+        except AdapterError as exc:
+            raise AdapterError(f"unexpected collection response for {repository}: {exc}") from exc
+        scopes.update(workflow_scopes | run_scopes | key_scopes)
 
         workflows = [
             {
@@ -171,20 +255,23 @@ def collect_github_inventory(
                 "path": item.get("path"),
                 "state": item.get("state"),
             }
-            for item in workflows_body["workflows"]
+            for item in workflow_items
             if isinstance(item, dict)
         ]
-        queued_runs = [
+        active_runs = [
             {
                 "id": item.get("id"),
+                "workflow_id": item.get("workflow_id"),
                 "name": item.get("name"),
                 "event": item.get("event"),
                 "status": item.get("status"),
+                "run_attempt": item.get("run_attempt"),
+                "head_sha": item.get("head_sha"),
                 "created_at": item.get("created_at"),
                 "html_url": item.get("html_url"),
             }
-            for item in runs_body["workflow_runs"]
-            if isinstance(item, dict)
+            for item in run_items
+            if isinstance(item, dict) and item.get("status") != "completed"
         ]
         deploy_keys = [
             {
@@ -194,7 +281,7 @@ def collect_github_inventory(
                 "verified": item.get("verified"),
                 "created_at": item.get("created_at"),
             }
-            for item in keys_body
+            for item in key_items
             if isinstance(item, dict)
         ]
         raw_permissions = repo_response.body.get("permissions", {})
@@ -215,13 +302,14 @@ def collect_github_inventory(
                 "default_branch": repo_response.body.get("default_branch"),
                 "permissions": permissions,
                 "workflows": workflows,
-                "workflow_count": workflows_body.get("total_count", len(workflows)),
-                "workflow_results_bounded": len(workflows) >= 100,
-                "queued_runs": queued_runs,
-                "queued_run_count": runs_body.get("total_count", len(queued_runs)),
-                "queued_run_results_bounded": len(queued_runs) >= 100,
+                "workflow_count": workflow_total,
+                "workflow_results_truncated": workflow_truncated,
+                "active_runs": active_runs,
+                "run_count_scanned": min(run_total, MAX_COLLECTION_ITEMS),
+                "run_results_truncated": run_truncated,
                 "deploy_keys": deploy_keys,
-                "deploy_key_results_bounded": len(deploy_keys) >= 100,
+                "deploy_key_count": key_total,
+                "deploy_key_results_truncated": key_truncated,
             }
         )
 
@@ -234,7 +322,7 @@ def collect_github_inventory(
         "oauth_scopes": sorted(scopes),
         "repositories": results,
         "limitations": [
-            "The inventory is bounded to 100 items per collection endpoint.",
+            f"Collections are capped at {MAX_COLLECTION_ITEMS} items with explicit truncation.",
             "An empty list may reflect missing permission, not absence.",
             "This inventory does not prove revocation closure.",
         ],

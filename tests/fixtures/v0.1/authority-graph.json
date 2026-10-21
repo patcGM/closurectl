@@ -1,0 +1,18 @@
+{
+  "schema_version": "1",
+  "title": "v0.1 compatibility fixture",
+  "nodes": [
+    {
+      "id": "sink",
+      "kind": "sink",
+      "label": "Already contained"
+    }
+  ],
+  "edges": [],
+  "roots": [
+    "sink"
+  ],
+  "sinks": [
+    "sink"
+  ]
+}

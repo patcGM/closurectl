@@ -38,6 +38,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "build>=1.2",
+  "coverage>=7.16",
   "jsonschema>=4.23",
   "pyinstaller>=6",
   "ruff>=0.8",
@@ -72,3 +73,12 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.coverage.run]
+branch = true
+source = ["closurectl"]
+
+[tool.coverage.report]
+fail_under = 70
+show_missing = true
+skip_covered = true

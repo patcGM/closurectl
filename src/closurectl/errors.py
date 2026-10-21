@@ -19,3 +19,7 @@ class AdapterError(ClosureCtlError):
 
 class SignatureError(ClosureCtlError):
     """A receipt signature or digest is invalid."""
+
+
+class ExecutionError(ClosureCtlError):
+    """A live provider operation could not be performed safely."""

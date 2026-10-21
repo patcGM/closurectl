@@ -29,6 +29,9 @@ coordinate disclosure based on impact and fix availability.
 - plaintext credential persistence;
 - command injection in provider adapters;
 - destructive behavior in a read-only command;
+- preview/confirmation substitution or stale-preview execution;
+- repeated mutation after a timeout or process crash;
+- observer credentials that are not independent of the mutation identity;
 - minimum-cut errors that incorrectly report `CLOSED`;
 - key overwrite or unsafe private-key handling;
 - provider responses being interpreted as stronger evidence than they are.
@@ -45,7 +48,13 @@ closurectl demo --dir closurectl-demo
 
 ## Security posture
 
-Version 0.1 has no live mutation adapters. GitHub and npm adapters are
-read-only and persist allow-listed metadata only. This significantly limits
-impact but does not make the software suitable for unattended production
-incident response.
+Version 0.2.0a1 has experimental live adapters for exact GitHub Actions
+workflow/run targets and exact npm token IDs. They are disabled unless the
+operator supplies `--experimental`, a fresh preview digest, independent
+observer/recovery credentials, and a journal path. Inventory and observation
+commands remain read-only.
+
+The adapters are intended for attended incident response only. Do not grant
+broader permissions than the exact disposable or incident scope requires. npm
+revocation may take up to one hour to propagate, and a provider acceptance
+response is never treated as closure evidence.
