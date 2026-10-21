@@ -259,6 +259,17 @@ def _latest_action_events(events: list[dict[str, Any]]) -> dict[str, dict[str, A
     return {event["action_id"]: event for event in events}
 
 
+def _requested_at(events: list[dict[str, Any]], action_id: str) -> str | None:
+    return next(
+        (
+            event["at"]
+            for event in events
+            if event["action_id"] == action_id and event["state"] == "REQUESTED"
+        ),
+        None,
+    )
+
+
 def _assert_journal_binding(
     events: list[dict[str, Any]], preview: dict[str, Any], plan: ClosurePlan
 ) -> None:
@@ -371,6 +382,7 @@ def _apply_execution_locked(
                 f"configured API origin changed after preview for {action.action_id}"
             )
         prior = latest.get(action.action_id)
+        requested_at = _requested_at(events, action.action_id)
         if prior is not None:
             current_binding = executor.binding(action, target)
             expected_binding = {
@@ -388,7 +400,14 @@ def _apply_execution_locked(
                 )
         if prior and prior["state"] == "VERIFIED":
             if resume:
-                revalidated = executor.reconcile(action, target)
+                if requested_at is None:
+                    raise ValidationError("verified journal action has no REQUESTED event")
+                revalidated = executor.reconcile(
+                    action,
+                    target,
+                    preview_action=preview_action,
+                    requested_at=requested_at,
+                )
                 if revalidated.state != "VERIFIED":
                     raise ExecutionError(
                         f"journal success no longer reconciles for {action.action_id}: "
@@ -419,7 +438,7 @@ def _apply_execution_locked(
                     f"provider state changed after preview for {action.action_id}; "
                     "generate a new preview"
                 )
-            _append_event(
+            requested = _append_event(
                 journal_path,
                 events,
                 validated,
@@ -435,11 +454,23 @@ def _apply_execution_locked(
                 "REQUESTED",
                 "mutation request started; reconcile before any retry",
             )
-            result = executor.apply(action, target)
+            result = executor.apply(
+                action,
+                target,
+                preview_action=preview_action,
+                requested_at=requested["at"],
+            )
         else:
             if prior["state"] == "PREVIEWED":
                 break
-            result = executor.reconcile(action, target)
+            if requested_at is None:
+                raise ValidationError("journal action has no REQUESTED event")
+            result = executor.reconcile(
+                action,
+                target,
+                preview_action=preview_action,
+                requested_at=requested_at,
+            )
 
         _append_event(
             journal_path,
@@ -519,14 +550,7 @@ def observe_execution(
     _assert_journal_binding(events, validated, plan)
     observations: list[dict[str, str]] = []
     for action in plan.actions:
-        requested_at = next(
-            (
-                event["at"]
-                for event in events
-                if event["action_id"] == action.action_id and event["state"] == "REQUESTED"
-            ),
-            None,
-        )
+        requested_at = _requested_at(events, action.action_id)
         target = parse_execution_target(action)
         executor = _executor_for(executors, action)
         preview_action = next(
@@ -536,7 +560,12 @@ def observe_execution(
             raise ExecutionError(
                 f"configured API origin changed after preview for {action.action_id}"
             )
-        result = executor.observe(action, target, requested_at=requested_at)
+        result = executor.observe(
+            action,
+            target,
+            requested_at=requested_at,
+            preview_action=preview_action,
+        )
         status = result.status
         summary = result.summary
         if (

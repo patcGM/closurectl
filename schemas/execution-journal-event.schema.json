@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/patcGM/closurectl/v0.2.0a1/schemas/execution-journal-event.schema.json",
+  "$id": "https://github.com/patcGM/closurectl/schemas/execution-journal-event.schema.json",
   "title": "closurectl append-only execution journal event",
   "type": "object",
   "additionalProperties": false,
@@ -55,6 +55,7 @@
     },
     "operation": {
       "enum": [
+        "aws.revoke_role_sessions",
         "github.disable_workflow",
         "github.cancel_run",
         "npm.revoke_token"
