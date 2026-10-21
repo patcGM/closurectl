@@ -3,6 +3,26 @@
 All notable changes are documented here. The project follows Semantic
 Versioning after the first public release.
 
+## Unreleased
+
+### Changed
+
+- release publication now verifies a successful destructive provider-lab run
+  on the exact tagged commit instead of trusting mutable repository metadata;
+- GitHub Actions dependencies are updated and remain pinned to full commit
+  SHAs;
+- internal planner invariants remain enforced when Python assertions are
+  disabled.
+
+### Repository security
+
+- `main` requires a current pull request, passing cross-platform checks, and an
+  independent code-owner review;
+- release and provider-lab deployments prevent self-review and administrator
+  bypass;
+- Actions SHA pinning, Dependabot security updates, secret scanning, and push
+  protection are enabled.
+
 ## 0.2.0a1 — 2026-10-21
 
 Experimental live-revocation alpha.
