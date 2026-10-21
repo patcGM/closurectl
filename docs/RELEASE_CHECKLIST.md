@@ -3,9 +3,10 @@
 ## Repository controls
 
 - Protect the `release` and `provider-lab` GitHub environments.
-- Enable `Prevent self-review` on `provider-lab` and require an approver other
-  than the workflow initiator. The initiator plus that distinct approver form
-  the required two-person control.
+- Disable administrator bypass, enable `Prevent self-review`, and require an
+  approver other than the workflow initiator on both environments. The
+  initiator plus that distinct approver form the required two-person control.
+- Require full-commit-SHA pinning for every GitHub Action.
 - Register the human release signer's GPG or SSH signing key with GitHub and
   configure Git so GitHub reports the annotated tag signature as `Verified`.
   The release gate also requires tagger `patcGM
@@ -31,8 +32,6 @@
   preview TTL or rerun the workflow.
 - Confirm the receipt is `CLOSED`, the break-glass identities still work, and
   uploaded artifacts contain no credential material.
-- Set repository variable `LIVE_DRILL_SHA` to that exact tested `main` commit
-  SHA.
 
 ## Publish
 
@@ -44,7 +43,8 @@
   ```
 
 - Approve the protected `release` environment only after the workflow confirms
-  the tag, version, `main` ancestry, and `LIVE_DRILL_SHA`.
+  the tag, version, `main` ancestry, and a successful `provider-lab` run on the
+  exact tagged commit.
 - Verify wheel, sdist, binaries, SBOM, checksums, and GitHub artifact
   attestations from a clean machine.
 - Keep the GitHub release marked prerelease while live adapters require

@@ -49,7 +49,8 @@ def _max_flow_and_reachable(
             capacity = residual[previous][current]
             bottleneck = capacity if bottleneck is None else min(bottleneck, capacity)
             current = previous
-        assert bottleneck is not None
+        if bottleneck is None:
+            raise RuntimeError("internal planner invariant: augmenting path has no capacity")
         current = sink
         while current != source:
             previous = parent[current]
@@ -166,7 +167,8 @@ def plan_closure(graph: AuthorityGraph) -> ClosurePlan:
     for edge in graph.edges:
         edge_in, edge_out = edge_vertices[edge.id]
         if edge.revocable and edge_in in reachable and edge_out not in reachable:
-            assert edge.enforcement is not None
+            if edge.enforcement is None:
+                raise RuntimeError("internal planner invariant: revocable edge has no enforcement")
             selected.append(
                 PlanAction(
                     action_id=f"close:{edge.id}",
