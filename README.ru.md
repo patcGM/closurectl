@@ -11,10 +11,10 @@ containment после компрометации учётной записи р
 перекрывающий все объявленные пути к критичным операциям.
 
 > [!IMPORTANT]
-> Версия 0.2.0a1 — alpha. Она добавляет opt-in экспериментальные мутации для
-> конкретных GitHub Actions workflows/runs и конкретных npm token IDs.
-> Обязательны короткоживущий preview, подтверждение digest, отдельная recovery
-> identity и независимая проверка. `CLOSED` относится только к объявленному
+> `closurectl` выполняет реальные высокорисковые mutations для точных GitHub
+> Actions, npm token и AWS IAM role targets. Обязательны короткоживущий preview,
+> подтверждение точного digest, отдельная recovery identity, hash-chained
+> journal и независимая проверка. `CLOSED` относится только к объявленному
 > графу и не доказывает полное удаление атакующего.
 
 ## Зачем это нужно
@@ -60,10 +60,10 @@ receipt: CLOSED
 
 ## Установка
 
-Готовые исполняемые файлы для Windows x86-64 и Linux x86-64 находятся в
-[GitHub Releases](https://github.com/patcGM/closurectl/releases). Сравните
-SHA-256 файла со значением из `SHA256SUMS.txt`. На macOS пока используйте
-`pipx` или установку из исходников.
+Готовые исполняемые файлы находятся в
+[GitHub Releases](https://github.com/patcGM/closurectl/releases). Текущий
+release pipeline публикует Windows x86-64, Linux x86-64/arm64 и нативные macOS
+arm64/x86-64. Сравните SHA-256 файла со значением из `SHA256SUMS.txt`.
 
 ```powershell
 # Windows PowerShell
@@ -82,7 +82,7 @@ chmod +x closurectl-linux-x86_64
 вариант установки с привязкой к конкретному релизу:
 
 ```bash
-pipx install "git+https://github.com/patcGM/closurectl.git@v0.2.0a1"
+pipx install "git+https://github.com/patcGM/closurectl.git@v0.3.0"
 ```
 
 ## Основной процесс
@@ -126,6 +126,10 @@ closurectl verify closure-receipt.json `
   --public-key incident-signing.pub.pem `
   --graph authority-graph.json `
   --plan closure-plan.json
+
+closurectl report authority-graph.json closure-plan.json closure-receipt.json `
+  --public-key incident-signing.pub.pem `
+  --out closure-report.html
 ```
 
 Приватный ключ нельзя хранить на заражённой машине или добавлять в git.
@@ -159,7 +163,46 @@ closurectl inventory npm `
 
 Один запуск принимает не более 50 packages и 1 000 элементов в коллекции.
 
-## Экспериментальный live revocation
+## Инвентаризация AWS IAM
+
+Используется отдельный read-only профиль AWS CLI и точные имена ролей.
+Environment access keys не передаются дочернему процессу:
+
+```powershell
+closurectl inventory aws `
+  --profile incident-observer `
+  --role ProductionDeployer `
+  --out aws-inventory.json
+```
+
+Сохраняются только разрешённые поля роли и условия GitHub OIDC trust. Для
+service-linked и IAM Identity Center managed roles live execution запрещён.
+
+## Incident wizard: inventory → graph
+
+Inventory не превращается в security claim автоматически. Сначала создаётся
+draft с предлагаемыми путями:
+
+```powershell
+closurectl incident draft `
+  --title "Compromised release identity" `
+  --github-inventory github-inventory.json `
+  --npm-inventory npm-inventory.json `
+  --aws-inventory aws-inventory.json `
+  --out incident-draft.json
+```
+
+Затем каждый путь подтверждается интерактивно:
+
+```powershell
+closurectl incident wizard incident-draft.json --out authority-graph.json
+```
+
+Для автоматизации используйте `incident build` с повторяемым `--select` и
+точным `--confirm DRAFT_DIGEST`. Если inventory был усечён, draft добавляет
+обязательный незакрываемый путь, и план становится `BLOCKED`.
+
+## Контролируемый live containment
 
 Запускайте мутации только с чистой машины и заранее проверенной recovery
 identity. Исполнимы только три точных контракта:
@@ -170,6 +213,8 @@ identity. Исполнимы только три точных контракта
   `github://OWNER/REPO/actions/runs/NUMERIC_ID`;
 - `npm:revoke_token` и target
   `npm://registry.npmjs.org/tokens/FULL_TOKEN_ID`.
+- `aws:revoke_role_sessions` и target
+  `aws://ACCOUNT_ID/iam/roles/ROLE_NAME`.
 
 Для GitHub нужны токены двух разных accounts:
 
@@ -186,6 +231,19 @@ $env:CLOSURECTL_NPM_MUTATION_USERCONFIG = "$HOME\.npmrc-mutation"
 $env:CLOSURECTL_NPM_RECOVERY_USERCONFIG = "$HOME\.npmrc-recovery"
 ```
 
+Для AWS нужны два разных CLI profiles двух разных principals в одном account:
+
+```powershell
+$env:CLOSURECTL_AWS_MUTATION_PROFILE = "incident-mutation"
+$env:CLOSURECTL_AWS_OBSERVER_PROFILE = "incident-observer"
+```
+
+AWS executor устанавливает стандартную inline policy
+`AWSRevokeOlderSessions` и отсекает все sessions роли, выпущенные до cutoff
+через 30 секунд после mutation request. Это не точечный logout одного
+атакующего. До окончания пятиминутного IAM propagation window evidence остаётся
+`INDETERMINATE`.
+
 OTP нельзя передавать аргументом CLI. Если npm требует OTP, используйте
 защищённую переменную/config npm и удалите её сразу после операции.
 
@@ -193,7 +251,7 @@ OTP нельзя передавать аргументом CLI. Если npm т�
 
 ```powershell
 closurectl execute preview authority-graph.json closure-plan.json `
-  --out execution-preview.json --experimental
+  --out execution-preview.json
 ```
 
 После проверки immutable targets и identities подтвердите точный
@@ -202,7 +260,7 @@ closurectl execute preview authority-graph.json closure-plan.json `
 ```powershell
 closurectl execute apply authority-graph.json closure-plan.json `
   execution-preview.json --confirm PREVIEW_DIGEST `
-  --journal execution.jsonl --experimental
+  --journal execution.jsonl
 ```
 
 После сбоя используйте `execute resume` с теми же файлами. Resume только
@@ -243,7 +301,8 @@ execution/evidence, `130` — прерывание. Глобальный `--json
 Перед реальным применением прочитайте
 [модель угроз](docs/THREAT_MODEL.md) и
 [формат графа](docs/GRAPH_FORMAT.md), а также
-[правила работы с receipt keys](docs/RECEIPT_KEYS.md).
+[правила работы с receipt keys](docs/RECEIPT_KEYS.md) и
+[AWS role-session containment](docs/AWS_ROLE_SESSIONS.md).
 
 ## Разработка
 

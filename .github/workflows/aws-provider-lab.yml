@@ -1,0 +1,290 @@
+name: Destructive AWS provider lab
+
+on:
+  workflow_dispatch:
+    inputs:
+      aws_account_id:
+        description: Exact disposable 12-digit AWS account ID
+        required: true
+        type: string
+      aws_role_name:
+        description: Exact disposable IAM role whose sessions may be revoked
+        required: true
+        type: string
+      destructive_confirmation:
+        description: Type REVOKE DISPOSABLE AWS ROLE SESSIONS
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: destructive-aws-provider-lab
+  cancel-in-progress: false
+
+env:
+  PIP_CONSTRAINT: requirements/release-constraints.txt
+
+jobs:
+  preview:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: provider-lab
+
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install exact lab build
+        run: python -m pip install .
+
+      - name: Materialize short-lived independent AWS profiles
+        env:
+          MUTATION_ROLE_ARN: ${{ secrets.LAB_AWS_MUTATION_ROLE_ARN }}
+          OBSERVER_ROLE_ARN: ${{ secrets.LAB_AWS_OBSERVER_ROLE_ARN }}
+        run: |
+          set -euo pipefail
+          test -n "${MUTATION_ROLE_ARN}"
+          test -n "${OBSERVER_ROLE_ARN}"
+          test "${MUTATION_ROLE_ARN}" != "${OBSERVER_ROLE_ARN}"
+          TOKEN_FILE="${RUNNER_TEMP}/aws-oidc-token"
+          CONFIG_FILE="${RUNNER_TEMP}/aws-config"
+          umask 077
+          curl --fail --silent --show-error \
+            --header "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" \
+            | jq -r '.value' > "${TOKEN_FILE}"
+          test -s "${TOKEN_FILE}"
+          export AWS_CONFIG_FILE="${CONFIG_FILE}"
+          aws configure set role_arn "${MUTATION_ROLE_ARN}" --profile closurectl-mutation
+          aws configure set web_identity_token_file "${TOKEN_FILE}" --profile closurectl-mutation
+          aws configure set role_session_name closurectl-provider-lab --profile closurectl-mutation
+          aws configure set region us-east-1 --profile closurectl-mutation
+          aws configure set role_arn "${OBSERVER_ROLE_ARN}" --profile closurectl-observer
+          aws configure set web_identity_token_file "${TOKEN_FILE}" --profile closurectl-observer
+          aws configure set role_session_name closurectl-provider-lab --profile closurectl-observer
+          aws configure set region us-east-1 --profile closurectl-observer
+          {
+            echo "AWS_CONFIG_FILE=${CONFIG_FILE}"
+            echo "CLOSURECTL_AWS_MUTATION_PROFILE=closurectl-mutation"
+            echo "CLOSURECTL_AWS_OBSERVER_PROFILE=closurectl-observer"
+          } >> "${GITHUB_ENV}"
+
+      - name: Build exact disposable graph and plan
+        env:
+          AWS_ACCOUNT_ID: ${{ inputs.aws_account_id }}
+          AWS_ROLE_NAME: ${{ inputs.aws_role_name }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import urllib.parse
+          from pathlib import Path
+
+          account = os.environ["AWS_ACCOUNT_ID"]
+          role = os.environ["AWS_ROLE_NAME"]
+          if not re.fullmatch(r"[0-9]{12}", account):
+              raise SystemExit("aws_account_id must contain exactly 12 digits")
+          if not re.fullmatch(r"[A-Za-z0-9_+=,.@-]{1,64}", role):
+              raise SystemExit("aws_role_name is invalid")
+          graph = {
+              "schema_version": "1",
+              "title": "Disposable closurectl AWS role-session lab",
+              "nodes": [
+                  {"id": "sessions", "kind": "temporary_credentials", "label": "Disposable sessions"},
+                  {"id": "effect", "kind": "consequential_sink", "label": "Disposable AWS effect"},
+              ],
+              "edges": [
+                  {
+                      "id": "revoke-role-sessions",
+                      "source": "sessions",
+                      "target": "effect",
+                      "kind": "derived_session",
+                      "label": "Revoke disposable IAM role sessions",
+                      "revocable": True,
+                      "cost": 1,
+                      "enforcement": {
+                          "provider": "aws",
+                          "operation": "revoke_role_sessions",
+                          "target": (
+                              f"aws://{account}/iam/roles/"
+                              f"{urllib.parse.quote(role, safe='')}"
+                          ),
+                          "phase": "revoke_descendants",
+                      },
+                  }
+              ],
+              "roots": ["sessions"],
+              "sinks": ["effect"],
+          }
+          Path("lab").mkdir()
+          Path("lab/authority-graph.json").write_text(
+              json.dumps(graph, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+          closurectl plan lab/authority-graph.json --out lab/closure-plan.json
+
+      - name: Generate short-lived AWS preview
+        run: |
+          closurectl execute preview \
+            lab/authority-graph.json lab/closure-plan.json \
+            --out lab/execution-preview.json
+
+      - name: Remove short-lived AWS material
+        if: always()
+        run: rm -f "${RUNNER_TEMP}/aws-oidc-token" "${RUNNER_TEMP}/aws-config"
+
+      - name: Upload preview for independent review
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: aws-provider-lab-preview-${{ github.sha }}
+          path: lab/
+          if-no-files-found: error
+          retention-days: 1
+
+  apply-and-observe:
+    needs: preview
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: provider-lab
+
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Confirm destructive disposable scope
+        env:
+          CONFIRMATION: ${{ inputs.destructive_confirmation }}
+        run: test "${CONFIRMATION}" = "REVOKE DISPOSABLE AWS ROLE SESSIONS"
+
+      - name: Install exact lab build
+        run: python -m pip install .
+
+      - name: Download independently reviewed preview
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: aws-provider-lab-preview-${{ github.sha }}
+          path: lab
+
+      - name: Materialize short-lived independent AWS profiles
+        env:
+          MUTATION_ROLE_ARN: ${{ secrets.LAB_AWS_MUTATION_ROLE_ARN }}
+          OBSERVER_ROLE_ARN: ${{ secrets.LAB_AWS_OBSERVER_ROLE_ARN }}
+        run: |
+          set -euo pipefail
+          test -n "${MUTATION_ROLE_ARN}"
+          test -n "${OBSERVER_ROLE_ARN}"
+          test "${MUTATION_ROLE_ARN}" != "${OBSERVER_ROLE_ARN}"
+          TOKEN_FILE="${RUNNER_TEMP}/aws-oidc-token"
+          CONFIG_FILE="${RUNNER_TEMP}/aws-config"
+          umask 077
+          curl --fail --silent --show-error \
+            --header "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" \
+            | jq -r '.value' > "${TOKEN_FILE}"
+          test -s "${TOKEN_FILE}"
+          export AWS_CONFIG_FILE="${CONFIG_FILE}"
+          aws configure set role_arn "${MUTATION_ROLE_ARN}" --profile closurectl-mutation
+          aws configure set web_identity_token_file "${TOKEN_FILE}" --profile closurectl-mutation
+          aws configure set role_session_name closurectl-provider-lab --profile closurectl-mutation
+          aws configure set region us-east-1 --profile closurectl-mutation
+          aws configure set role_arn "${OBSERVER_ROLE_ARN}" --profile closurectl-observer
+          aws configure set web_identity_token_file "${TOKEN_FILE}" --profile closurectl-observer
+          aws configure set role_session_name closurectl-provider-lab --profile closurectl-observer
+          aws configure set region us-east-1 --profile closurectl-observer
+          {
+            echo "AWS_CONFIG_FILE=${CONFIG_FILE}"
+            echo "CLOSURECTL_AWS_MUTATION_PROFILE=closurectl-mutation"
+            echo "CLOSURECTL_AWS_OBSERVER_PROFILE=closurectl-observer"
+          } >> "${GITHUB_ENV}"
+
+      - name: Apply, probe the old session, observe, and sign
+        env:
+          AWS_ACCOUNT_ID: ${{ inputs.aws_account_id }}
+          AWS_ROLE_NAME: ${{ inputs.aws_role_name }}
+        run: |
+          set -euo pipefail
+          TARGET_ROLE_ARN="arn:aws:iam::${AWS_ACCOUNT_ID}:role/${AWS_ROLE_NAME}"
+          OLD_SESSION="$(aws sts assume-role \
+            --profile closurectl-mutation \
+            --role-arn "${TARGET_ROLE_ARN}" \
+            --role-session-name closurectl-pre-cutoff-probe \
+            --duration-seconds 900 \
+            --output json)"
+          export AWS_ACCESS_KEY_ID
+          export AWS_SECRET_ACCESS_KEY
+          export AWS_SESSION_TOKEN
+          AWS_ACCESS_KEY_ID="$(printf '%s' "${OLD_SESSION}" | jq -r '.Credentials.AccessKeyId')"
+          AWS_SECRET_ACCESS_KEY="$(printf '%s' "${OLD_SESSION}" | jq -r '.Credentials.SecretAccessKey')"
+          AWS_SESSION_TOKEN="$(printf '%s' "${OLD_SESSION}" | jq -r '.Credentials.SessionToken')"
+          echo "::add-mask::${AWS_ACCESS_KEY_ID}"
+          echo "::add-mask::${AWS_SECRET_ACCESS_KEY}"
+          echo "::add-mask::${AWS_SESSION_TOKEN}"
+
+          PREVIEW_DIGEST="$(python -c "import json; print(json.load(open('lab/execution-preview.json'))['preview_digest'])")"
+          closurectl execute apply \
+            lab/authority-graph.json lab/closure-plan.json lab/execution-preview.json \
+            --confirm "${PREVIEW_DIGEST}" --journal lab/execution.jsonl
+          sleep 360
+
+          set +e
+          OLD_SESSION_RESULT="$(aws iam get-role \
+            --role-name "${AWS_ROLE_NAME}" --output json --no-cli-pager 2>&1)"
+          OLD_SESSION_STATUS=$?
+          set -e
+          if [ "${OLD_SESSION_STATUS}" -eq 0 ]; then
+            echo "pre-cutoff role session still has permission after propagation" >&2
+            exit 1
+          fi
+          if ! grep -q "AccessDenied" <<< "${OLD_SESSION_RESULT}"; then
+            echo "pre-cutoff role-session probe failed for an unexpected reason" >&2
+            exit 1
+          fi
+          printf '%s\n' "DENIED_AS_EXPECTED" > lab/old-session-probe.txt
+          unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+
+          closurectl observe \
+            lab/authority-graph.json lab/closure-plan.json lab/execution-preview.json \
+            --journal lab/execution.jsonl --out lab/evidence.json
+          closurectl keygen --private-key "${RUNNER_TEMP}/receipt-private.pem" \
+            --public-key lab/receipt-public.pem
+          closurectl receipt \
+            lab/authority-graph.json lab/closure-plan.json lab/evidence.json \
+            --private-key "${RUNNER_TEMP}/receipt-private.pem" \
+            --out lab/closure-receipt.json
+          closurectl verify lab/closure-receipt.json \
+            --public-key lab/receipt-public.pem \
+            --graph lab/authority-graph.json --plan lab/closure-plan.json
+          printf '%s\n' "${GITHUB_SHA}" > lab/tested-commit.txt
+
+      - name: Remove short-lived AWS material
+        if: always()
+        run: rm -f "${RUNNER_TEMP}/aws-oidc-token" "${RUNNER_TEMP}/aws-config" \
+          "${RUNNER_TEMP}/receipt-private.pem"
+
+      - name: Upload secret-free AWS evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: aws-provider-lab-${{ github.sha }}
+          path: lab/
+          if-no-files-found: error
+          retention-days: 14

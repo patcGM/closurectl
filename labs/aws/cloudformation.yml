@@ -1,0 +1,121 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Disposable IAM roles for the closurectl AWS role-session provider lab
+
+Parameters:
+  GitHubOidcProviderArn:
+    Type: String
+    Description: Existing IAM OIDC provider ARN for token.actions.githubusercontent.com
+  GitHubOwner:
+    Type: String
+    Default: patcGM
+  GitHubRepository:
+    Type: String
+    Default: closurectl
+  GitHubEnvironment:
+    Type: String
+    Default: provider-lab
+  MutationRoleName:
+    Type: String
+    Default: closurectl-lab-mutation
+  ObserverRoleName:
+    Type: String
+    Default: closurectl-lab-observer
+  TargetRoleName:
+    Type: String
+    Default: closurectl-lab-target
+
+Resources:
+  MutationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref MutationRoleName
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref GitHubOidcProviderArn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub >-
+                  repo:${GitHubOwner}/${GitHubRepository}:environment:${GitHubEnvironment}
+      Policies:
+        - PolicyName: closurectl-exact-lab-mutation
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - iam:GetRole
+                  - iam:GetRolePolicy
+                  - iam:PutRolePolicy
+                  - sts:AssumeRole
+                Resource: !Sub >-
+                  arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${TargetRoleName}
+
+  ObserverRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref ObserverRoleName
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref GitHubOidcProviderArn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub >-
+                  repo:${GitHubOwner}/${GitHubRepository}:environment:${GitHubEnvironment}
+      Policies:
+        - PolicyName: closurectl-exact-lab-observer
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - iam:GetRole
+                  - iam:GetRolePolicy
+                Resource: !Sub >-
+                  arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${TargetRoleName}
+
+  TargetRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref TargetRoleName
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub >-
+                arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${MutationRoleName}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: closurectl-old-session-probe
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: iam:GetRole
+                Resource: !Sub >-
+                  arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${TargetRoleName}
+
+Outputs:
+  MutationRoleArn:
+    Value: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${MutationRoleName}
+  ObserverRoleArn:
+    Value: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ObserverRoleName}
+  TargetRoleName:
+    Value: !Ref TargetRoleName
+  AccountId:
+    Value: !Ref AWS::AccountId

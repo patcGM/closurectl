@@ -157,7 +157,7 @@ jobs:
         run: |
           closurectl execute preview \
             lab/authority-graph.json lab/closure-plan.json \
-            --out lab/execution-preview.json --experimental
+            --out lab/execution-preview.json
 
       - name: Remove credential configs
         if: always()
@@ -229,7 +229,7 @@ jobs:
           PREVIEW_DIGEST="$(python -c "import json; print(json.load(open('lab/execution-preview.json'))['preview_digest'])")"
           closurectl execute apply \
             lab/authority-graph.json lab/closure-plan.json lab/execution-preview.json \
-            --confirm "${PREVIEW_DIGEST}" --journal lab/execution.jsonl --experimental
+            --confirm "${PREVIEW_DIGEST}" --journal lab/execution.jsonl
 
       - name: Wait for npm propagation safety window
         run: sleep 3600

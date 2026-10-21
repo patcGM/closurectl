@@ -3,14 +3,28 @@
 All notable changes are documented here. The project follows Semantic
 Versioning after the first public release.
 
-## Unreleased
+## 0.3.0 — 2026-10-21
+
+### Added
+
+- human-confirmed incident drafts built from bounded GitHub, npm, and AWS
+  inventories, with an interactive wizard and exact non-interactive selection;
+- deterministic, self-contained HTML reports and timelines generated only
+  after receipt-signature verification;
+- allow-listed AWS IAM role inventory and exact `AWSRevokeOlderSessions`
+  execution through independent mutation and observer profiles;
+- protected disposable AWS/OIDC provider-lab workflow;
+- Linux arm64 and native macOS arm64/x86-64 binary build matrices.
 
 ### Changed
 
 - release publication now verifies a successful destructive provider-lab run
-  on the exact tagged commit instead of trusting mutable repository metadata;
+  for GitHub/npm and AWS on the exact tagged commit instead of trusting mutable
+  repository metadata;
 - GitHub Actions dependencies are updated and remain pinned to full commit
   SHAs;
+- exact live operations retain preview/digest/recovery controls without
+  requiring the legacy `--experimental` feature flag;
 - internal planner invariants remain enforced when Python assertions are
   disabled.
 
