@@ -47,6 +47,7 @@ def _run_aws(
     profile: str,
     timeout: float = 30.0,
     expect_json: bool = True,
+    max_attempts: int | None = None,
 ) -> Any:
     executable = shutil.which("aws")
     if not executable:
@@ -81,6 +82,10 @@ def _run_aws(
     }
     environment["AWS_PAGER"] = ""
     environment["AWS_CLI_AUTO_PROMPT"] = "off"
+    if max_attempts is not None:
+        if type(max_attempts) is not int or max_attempts < 1:
+            raise AdapterError("AWS max_attempts must be a positive integer")
+        environment["AWS_MAX_ATTEMPTS"] = str(max_attempts)
     command = [
         executable,
         *arguments,

@@ -79,8 +79,17 @@ class AwsHarness:
         self.raise_after_put = False
         self.interrupt_after_put = False
         self.put_count = 0
+        self.put_max_attempts: list[int | None] = []
 
-    def run(self, arguments, *, profile, timeout=30.0, expect_json=True):
+    def run(
+        self,
+        arguments,
+        *,
+        profile,
+        timeout=30.0,
+        expect_json=True,
+        max_attempts=None,
+    ):
         del timeout
         if arguments[:2] == ["iam", "get-role"]:
             return {
@@ -103,6 +112,7 @@ class AwsHarness:
             }
         if arguments[:2] == ["iam", "put-role-policy"]:
             self.put_count += 1
+            self.put_max_attempts.append(max_attempts)
             policy_name = arguments[arguments.index("--policy-name") + 1]
             document = arguments[arguments.index("--policy-document") + 1]
             self.policies[policy_name] = json.loads(document)
@@ -111,7 +121,7 @@ class AwsHarness:
             if self.raise_after_put:
                 raise AdapterError("simulated timeout after commit")
             return "" if not expect_json else None
-        raise AssertionError((arguments, profile, expect_json))
+        raise AssertionError((arguments, profile, expect_json, max_attempts))
 
 
 def identity(profile: str) -> dict[str, str]:
@@ -142,14 +152,20 @@ class AwsExecutorTests(unittest.TestCase):
                 "AWS_SECRET_ACCESS_KEY": "must-not-reach-child",
                 "AWS_SESSION_TOKEN": "must-not-reach-child",
                 "AWS_PROFILE": "wrong-profile",
+                "AWS_MAX_ATTEMPTS": "99",
             },
         ):
-            _run_aws(["sts", "get-caller-identity"], profile="observer")
+            _run_aws(
+                ["sts", "get-caller-identity"],
+                profile="observer",
+                max_attempts=1,
+            )
         child_environment = run.call_args.kwargs["env"]
         self.assertNotIn("AWS_ACCESS_KEY_ID", child_environment)
         self.assertNotIn("AWS_SECRET_ACCESS_KEY", child_environment)
         self.assertNotIn("AWS_SESSION_TOKEN", child_environment)
         self.assertNotIn("AWS_PROFILE", child_environment)
+        self.assertEqual(child_environment["AWS_MAX_ATTEMPTS"], "1")
         command = run.call_args.args[0]
         self.assertEqual(command[command.index("--profile") + 1], "observer")
 
@@ -299,6 +315,7 @@ class AwsExecutorTests(unittest.TestCase):
         self.assertEqual(result.state, "VERIFIED")
         self.assertEqual(resumed.state, "VERIFIED")
         self.assertEqual(harness.put_count, 1)
+        self.assertEqual(harness.put_max_attempts, [1])
 
     def test_apply_refuses_a_preview_after_its_bound_cutoff(self) -> None:
         harness = AwsHarness()
