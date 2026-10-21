@@ -3,6 +3,27 @@
 All notable changes are documented here. The project follows Semantic
 Versioning after the first public release.
 
+## 1.0.0 — 2026-10-21
+
+### Security and correctness
+
+- strict JSON, timestamp, target URI, provider-output, pagination, and process
+  output bounds with cross-platform Unicode handling;
+- unique preview-bound AWS role-session containment policies protected by IAM
+  `RoleId`, exact observer reconciliation, and old/new session canaries;
+- strict inventory runtime schemas, source-digest/JSON-path provenance,
+  freshness enforcement, conflict rejection, and an overwrite-safe TTY wizard;
+- evidence-bound HTML reporting with full journal validation, restrictive CSP,
+  control-character neutralization, collision refusal, and output SHA-256.
+
+### Release engineering
+
+- exact-SHA full CI, independent review, disposable GitHub/npm/AWS drills,
+  signed tags, checked-in release notes, and protected-environment approval are
+  mandatory for stable publication;
+- stable compatibility, provider requirements, support routing, checksum, and
+  GitHub attestation verification are documented.
+
 ## 0.3.0 — 2026-10-21
 
 ### Added
@@ -11,8 +32,9 @@ Versioning after the first public release.
   inventories, with an interactive wizard and exact non-interactive selection;
 - deterministic, self-contained HTML reports and timelines generated only
   after receipt-signature verification;
-- allow-listed AWS IAM role inventory and exact `AWSRevokeOlderSessions`
-  execution through independent mutation and observer profiles;
+- allow-listed AWS IAM role inventory and unique preview-bound
+  `ClosureCtlRevokeOlderSessions-*` execution through independent mutation and
+  observer profiles without overwriting `AWSRevokeOlderSessions`;
 - protected disposable AWS/OIDC provider-lab workflow;
 - Linux arm64 and native macOS arm64/x86-64 binary build matrices.
 

@@ -20,7 +20,7 @@ from .execution_models import (
 from .executors.base import ProviderExecutor
 from .models import AuthorityGraph, ClosurePlan, PlanAction
 from .receipts import utc_now
-from .serialization import digest_json, reject_secret_fields
+from .serialization import digest_json, parse_json_text, reject_secret_fields
 
 TERMINAL_STATES = {"VERIFIED", "FAILED", "INDETERMINATE"}
 
@@ -108,9 +108,9 @@ def validate_execution_preview(
         raise ValidationError("preview graph_digest does not match the supplied graph")
     if validated["plan_digest"] != plan.digest:
         raise ValidationError("preview plan_digest does not match the supplied plan")
+    created = parse_rfc3339(validated["created_at"], "preview.created_at")
     if require_fresh:
         current = now().astimezone(timezone.utc)
-        created = parse_rfc3339(validated["created_at"], "preview.created_at")
         expires = parse_rfc3339(validated["expires_at"], "preview.expires_at")
         if created > current + timedelta(seconds=30):
             raise ExecutionError("execution preview creation time is in the future")
@@ -148,6 +148,14 @@ def validate_execution_preview(
         target = parse_execution_target(expected)
         if actual["target_details"] != target.to_dict():
             raise ValidationError("preview target details do not match the plan")
+        if expected.provider == "aws":
+            planned_cutoff = actual["resource"].get("planned_cutoff")
+            cutoff = parse_rfc3339(planned_cutoff, "preview AWS planned_cutoff")
+            cutoff_delay = (cutoff - created).total_seconds()
+            if not PREVIEW_TTL_SECONDS + 15 <= cutoff_delay <= PREVIEW_TTL_SECONDS + 60:
+                raise ValidationError(
+                    "AWS planned cutoff must be 15 to 60 seconds after preview expiry"
+                )
     return validated
 
 
@@ -170,10 +178,7 @@ def read_execution_journal(path: str | Path) -> list[dict[str, Any]]:
     for index, line in enumerate(lines, start=1):
         if not line.strip():
             raise ValidationError(f"execution journal has a blank line at {index}")
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError as exc:
-            raise ValidationError(f"invalid execution journal JSON at line {index}") from exc
+        event = parse_json_text(line, source=f"execution journal line {index}")
         if not isinstance(event, dict):
             raise ValidationError(f"execution journal line {index} must be an object")
         required = {
@@ -199,7 +204,7 @@ def read_execution_journal(path: str | Path) -> list[dict[str, Any]]:
             raise ValidationError(f"execution journal types are invalid at line {index}")
         if (
             event["schema_version"] != EXECUTION_SCHEMA_VERSION
-            or isinstance(event["sequence"], bool)
+            or type(event["sequence"]) is not int
             or event["sequence"] != index
         ):
             raise ValidationError(f"execution journal sequence is invalid at line {index}")
@@ -420,25 +425,29 @@ def _apply_execution_locked(
         if prior is None:
             if resume:
                 break
-            current = executor.preview(action, target)
-            expected = {
-                key: preview_action[key]
-                for key in (
-                    "provider_account",
-                    "api_origin",
-                    "mutation_identity",
-                    "observer_identity",
-                    "current_state",
-                    "effect",
-                    "resource",
-                )
-            }
-            if current != expected:
-                raise ExecutionError(
-                    f"provider state changed after preview for {action.action_id}; "
-                    "generate a new preview"
-                )
-            requested = _append_event(
+            validator = getattr(executor, "validate_confirmed_preview", None)
+            if callable(validator):
+                validator(action, target, preview_action)
+            else:
+                current = executor.preview(action, target)
+                expected = {
+                    key: preview_action[key]
+                    for key in (
+                        "provider_account",
+                        "api_origin",
+                        "mutation_identity",
+                        "observer_identity",
+                        "current_state",
+                        "effect",
+                        "resource",
+                    )
+                }
+                if current != expected:
+                    raise ExecutionError(
+                        f"provider state changed after preview for {action.action_id}; "
+                        "generate a new preview"
+                    )
+            _append_event(
                 journal_path,
                 events,
                 validated,
@@ -446,7 +455,7 @@ def _apply_execution_locked(
                 "PREVIEWED",
                 "fresh provider state matched the confirmed preview",
             )
-            _append_event(
+            requested = _append_event(
                 journal_path,
                 events,
                 validated,

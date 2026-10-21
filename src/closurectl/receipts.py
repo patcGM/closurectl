@@ -46,6 +46,10 @@ V2_OBSERVATION_FIELDS = {
     "probe_type",
 }
 EVIDENCE_MAX_AGE_SECONDS = 900
+_RFC3339 = re.compile(
+    r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+    r"(?:\.[0-9]+)?(?:Z|[+-][0-9]{2}:[0-9]{2})$"
+)
 
 
 def utc_now() -> str:
@@ -69,7 +73,7 @@ def _require_exact_fields(
 
 
 def _validate_timestamp(value: Any, field: str) -> str:
-    if not isinstance(value, str) or not value:
+    if not isinstance(value, str) or not _RFC3339.fullmatch(value):
         raise ValidationError(f"{field} must be a non-empty RFC 3339 timestamp")
     normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
     try:
@@ -324,6 +328,39 @@ def create_receipt(
             "algorithm": "Ed25519",
             "value": base64.b64encode(signature).decode("ascii"),
         },
+    }
+
+
+def validate_evidence_binding(
+    plan: ClosurePlan,
+    evidence: dict[str, Any],
+    receipt: dict[str, Any],
+) -> dict[str, str]:
+    """Bind a separately supplied evidence artifact to signed receipt fields."""
+    if not isinstance(receipt, dict):
+        raise ValidationError("evidence binding requires a receipt object")
+    if not isinstance(evidence, dict):
+        raise ValidationError("evidence binding requires an evidence object")
+    schema_version = receipt.get("schema_version")
+    if evidence.get("schema_version") != schema_version:
+        raise ValidationError("evidence schema_version does not match the signed receipt")
+    receipt_time = receipt.get("issued_at")
+    if not isinstance(receipt_time, str):
+        raise ValidationError("signed receipt issued_at is invalid")
+    observations, missing = _validate_evidence(
+        plan,
+        evidence,
+        receipt_time=receipt_time,
+    )
+    if receipt.get("plan_digest") != plan.digest:
+        raise ValidationError("signed receipt plan_digest does not match the plan")
+    if receipt.get("observations") != observations:
+        raise ValidationError("evidence observations do not match the signed receipt")
+    if receipt.get("missing_actions") != missing:
+        raise ValidationError("evidence missing actions do not match the signed receipt")
+    return {
+        "evidence_digest": digest_json(evidence),
+        "receipt_digest": str(receipt.get("receipt_digest", "")),
     }
 
 

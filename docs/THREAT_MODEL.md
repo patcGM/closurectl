@@ -27,7 +27,7 @@ originated.
 
 ## Trust assumptions
 
-Version 0.3.0 assumes:
+Version 1.0.0 assumes:
 
 - planning and signing happen on a known-clean machine;
 - the operator has an independent recovery identity;
@@ -98,10 +98,11 @@ plan actions remain descriptive metadata.
 12. **Mutation is not observation.** Only the separate observer identity can
     produce provider evidence v2. An accepted mutation never becomes
     `VERIFIED_CLOSED` directly.
-13. **AWS revocation is role-wide and time-bounded.** The AWS executor writes
-    only the standard `AWSRevokeOlderSessions` inline policy to one exact IAM
-    role. Preview records any existing policy, resume never repeats an unknown
-    mutation, and evidence stays indeterminate through the propagation window.
+13. **AWS revocation is role-wide, unique, and time-bounded.** The AWS executor
+    creates one preview-bound `ClosureCtlRevokeOlderSessions-*` inline policy
+    on the exact previewed IAM `RoleId`; it never overwrites
+    `AWSRevokeOlderSessions`. Resume never calls `PutRolePolicy`, and evidence
+    requires the exact name, cutoff, and policy digest after propagation.
 
 ## Closure states
 
@@ -123,7 +124,8 @@ The release permits only:
 - disabling one exact GitHub Actions workflow;
 - cancelling one exact GitHub Actions run;
 - revoking one exact npm token ID at `registry.npmjs.org`;
-- replacing `AWSRevokeOlderSessions` on one exact standard-partition IAM role.
+- creating one unique preview-bound deny policy on one exact
+  standard-partition IAM role.
 
 GitHub mutation and observation must use different GitHub accounts. npm
 mutation and recovery must use different userconfig files for the same account,
@@ -134,9 +136,9 @@ AWS mutation and observation must use different CLI profiles that resolve
 through STS to different principals in the target account. Service-linked
 roles, IAM Identity Center managed roles, non-standard AWS partitions, trust
 policy rewrites, and individual-session targeting are refused. The deny cutoff
-is 30 seconds after the recorded request and affects every role session issued
-before it. A separate observer must still see the exact standard policy after
-the five-minute propagation window before evidence can be `VERIFIED_CLOSED`.
+is fixed by the confirmed preview and affects every role session issued before
+it. A separate observer must still see the exact preview-bound policy after the
+five-minute propagation window before evidence can be `VERIFIED_CLOSED`.
 
 GitHub workflow disable can be rolled back manually with the exact workflow
 enable API after the incident is understood. Run cancellation and npm token
@@ -145,9 +147,9 @@ revocation are irreversible; the operator creates a new run or token instead.
 activity may make it unsafe.
 
 For AWS, rollback means reviewing whether the incident is contained and then
-manually restoring or deleting `AWSRevokeOlderSessions`. Automatic rollback is
-especially unsafe because it can re-enable attacker sessions that have not yet
-expired.
+manually deleting the exact `ClosureCtlRevokeOlderSessions-*` policy recorded
+by the receipt. Automatic rollback is especially unsafe because it can
+re-enable attacker sessions that have not yet expired.
 
 Every release still requires successful protected disposable-provider drills
 on the exact release commit, two-person review, and maintained

@@ -97,8 +97,7 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              AWS: !Sub >-
-                arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${MutationRoleName}
+              AWS: !GetAtt MutationRole.Arn
             Action: sts:AssumeRole
       Policies:
         - PolicyName: closurectl-old-session-probe

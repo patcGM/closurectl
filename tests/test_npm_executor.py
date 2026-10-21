@@ -66,6 +66,7 @@ class NpmExecutorTests(unittest.TestCase):
                 {
                     "id": "12345678-abcd",
                     "name": "compromised",
+                    "readonly": False,
                     "key": "***",
                     "token": "target-token...",
                 }
@@ -87,6 +88,7 @@ class NpmExecutorTests(unittest.TestCase):
             [
                 {
                     "id": "12345678-abcd",
+                    "readonly": False,
                     "key": "different-id",
                     "token": "npm_NYn6...jCq0",
                 }
@@ -99,7 +101,7 @@ class NpmExecutorTests(unittest.TestCase):
     @patch("closurectl.executors.npm._run_npm")
     def test_revoke_reconciles_with_recovery_config(self, run_npm) -> None:
         run_npm.side_effect = [
-            [{"id": "12345678-abcd"}],
+            [{"id": "12345678-abcd", "readonly": False}],
             "",
             [],
         ]
@@ -121,7 +123,7 @@ class NpmExecutorTests(unittest.TestCase):
     @patch("closurectl.executors.npm._run_npm")
     def test_timeout_after_commit_does_not_repeat_revoke(self, run_npm) -> None:
         run_npm.side_effect = [
-            [{"id": "12345678-abcd"}],
+            [{"id": "12345678-abcd", "readonly": False}],
             AdapterError("npm command timed out; reconcile before retrying a mutation"),
             [],
         ]

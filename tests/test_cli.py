@@ -5,12 +5,32 @@ import io
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from closurectl.cli import main
+from closurectl.cli import _configure_utf8_output, main
 from closurectl.serialization import digest_json, read_json, write_json
 
 
 class CliTests(unittest.TestCase):
+    def test_windows_console_streams_are_reconfigured_for_utf8(self) -> None:
+        class ReconfigurableStream(io.StringIO):
+            def __init__(self) -> None:
+                super().__init__()
+                self.configuration = None
+
+            def reconfigure(self, **kwargs) -> None:
+                self.configuration = kwargs
+
+        stdout = ReconfigurableStream()
+        stderr = ReconfigurableStream()
+        with (
+            patch("closurectl.cli.sys.stdout", stdout),
+            patch("closurectl.cli.sys.stderr", stderr),
+        ):
+            _configure_utf8_output()
+        self.assertEqual(stdout.configuration, {"encoding": "utf-8", "errors": "backslashreplace"})
+        self.assertEqual(stderr.configuration, {"encoding": "utf-8", "errors": "backslashreplace"})
+
     def test_non_utf8_input_returns_validation_exit_code(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "graph.json"

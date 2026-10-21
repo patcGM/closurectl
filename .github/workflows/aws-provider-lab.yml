@@ -18,7 +18,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 concurrency:
   group: destructive-aws-provider-lab
@@ -30,9 +29,12 @@ env:
 jobs:
   preview:
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: provider-lab
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
       - name: Check out exact source
@@ -46,6 +48,20 @@ jobs:
 
       - name: Install exact lab build
         run: python -m pip install .
+
+      - name: Restrict preview to registered disposable target
+        env:
+          REQUESTED_ACCOUNT: ${{ inputs.aws_account_id }}
+          REQUESTED_ROLE: ${{ inputs.aws_role_name }}
+          EXPECTED_ACCOUNT: ${{ secrets.LAB_AWS_ACCOUNT_ID }}
+          EXPECTED_ROLE: ${{ secrets.LAB_AWS_TARGET_ROLE_NAME }}
+        run: |
+          set -euo pipefail
+          test -n "${EXPECTED_ACCOUNT}"
+          test -n "${EXPECTED_ROLE}"
+          test "${REQUESTED_ACCOUNT}" = "${EXPECTED_ACCOUNT}"
+          test "${REQUESTED_ROLE}" = "${EXPECTED_ROLE}"
+          case "${REQUESTED_ROLE}" in closurectl-lab-*) ;; *) exit 1 ;; esac
 
       - name: Materialize short-lived independent AWS profiles
         env:
@@ -88,7 +104,6 @@ jobs:
           import json
           import os
           import re
-          import urllib.parse
           from pathlib import Path
 
           account = os.environ["AWS_ACCOUNT_ID"]
@@ -116,10 +131,7 @@ jobs:
                       "enforcement": {
                           "provider": "aws",
                           "operation": "revoke_role_sessions",
-                          "target": (
-                              f"aws://{account}/iam/roles/"
-                              f"{urllib.parse.quote(role, safe='')}"
-                          ),
+                          "target": f"aws://{account}/iam/roles/{role}",
                           "phase": "revoke_descendants",
                       },
                   }
@@ -135,17 +147,17 @@ jobs:
           PY
           closurectl plan lab/authority-graph.json --out lab/closure-plan.json
 
-      - name: Generate short-lived AWS preview
+      - name: Generate exact short-lived preview
         run: |
           closurectl execute preview \
             lab/authority-graph.json lab/closure-plan.json \
             --out lab/execution-preview.json
 
-      - name: Remove short-lived AWS material
+      - name: Remove preview credentials
         if: always()
         run: rm -f "${RUNNER_TEMP}/aws-oidc-token" "${RUNNER_TEMP}/aws-config"
 
-      - name: Upload preview for independent review
+      - name: Upload exact preview for independent review
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: aws-provider-lab-preview-${{ github.sha }}
@@ -156,9 +168,12 @@ jobs:
   apply-and-observe:
     needs: preview
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: provider-lab
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
       - name: Check out exact source
@@ -173,12 +188,23 @@ jobs:
       - name: Confirm destructive disposable scope
         env:
           CONFIRMATION: ${{ inputs.destructive_confirmation }}
-        run: test "${CONFIRMATION}" = "REVOKE DISPOSABLE AWS ROLE SESSIONS"
+          REQUESTED_ACCOUNT: ${{ inputs.aws_account_id }}
+          REQUESTED_ROLE: ${{ inputs.aws_role_name }}
+          EXPECTED_ACCOUNT: ${{ secrets.LAB_AWS_ACCOUNT_ID }}
+          EXPECTED_ROLE: ${{ secrets.LAB_AWS_TARGET_ROLE_NAME }}
+        run: |
+          set -euo pipefail
+          test "${CONFIRMATION}" = "REVOKE DISPOSABLE AWS ROLE SESSIONS"
+          test -n "${EXPECTED_ACCOUNT}"
+          test -n "${EXPECTED_ROLE}"
+          test "${REQUESTED_ACCOUNT}" = "${EXPECTED_ACCOUNT}"
+          test "${REQUESTED_ROLE}" = "${EXPECTED_ROLE}"
+          case "${REQUESTED_ROLE}" in closurectl-lab-*) ;; *) exit 1 ;; esac
 
       - name: Install exact lab build
         run: python -m pip install .
 
-      - name: Download independently reviewed preview
+      - name: Download independently reviewed exact preview
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: aws-provider-lab-preview-${{ github.sha }}
@@ -227,7 +253,7 @@ jobs:
             --profile closurectl-mutation \
             --role-arn "${TARGET_ROLE_ARN}" \
             --role-session-name closurectl-pre-cutoff-probe \
-            --duration-seconds 900 \
+            --duration-seconds 3600 \
             --output json)"
           export AWS_ACCESS_KEY_ID
           export AWS_SECRET_ACCESS_KEY
@@ -239,11 +265,40 @@ jobs:
           echo "::add-mask::${AWS_SECRET_ACCESS_KEY}"
           echo "::add-mask::${AWS_SESSION_TOKEN}"
 
+          EXPECTED_ROLE_ID="$(python -c \
+            "import json; print(json.load(open('lab/execution-preview.json'))['actions'][0]['resource']['role']['role_id'])")"
+          OLD_BASELINE="$(aws iam get-role \
+            --role-name "${AWS_ROLE_NAME}" --output json --no-cli-pager)"
+          test "$(printf '%s' "${OLD_BASELINE}" | jq -r '.Role.RoleId')" = "${EXPECTED_ROLE_ID}"
+          printf '%s\n' "ALLOWED_BEFORE_MUTATION" > lab/old-session-baseline.txt
+
           PREVIEW_DIGEST="$(python -c "import json; print(json.load(open('lab/execution-preview.json'))['preview_digest'])")"
           closurectl execute apply \
             lab/authority-graph.json lab/closure-plan.json lab/execution-preview.json \
             --confirm "${PREVIEW_DIGEST}" --journal lab/execution.jsonl
-          sleep 360
+          WAIT_SECONDS="$(python - <<'PY'
+          import datetime
+          import json
+          import math
+
+          def timestamp(value):
+              return datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+          preview = json.load(open("lab/execution-preview.json", encoding="utf-8"))
+          cutoff = timestamp(preview["actions"][0]["resource"]["planned_cutoff"])
+          events = [
+              json.loads(line)
+              for line in open("lab/execution.jsonl", encoding="utf-8")
+          ]
+          requested = timestamp(
+              next(event["at"] for event in events if event["state"] == "REQUESTED")
+          )
+          ready = max(cutoff, requested) + datetime.timedelta(seconds=300)
+          now = datetime.datetime.now(datetime.timezone.utc)
+          print(max(0, math.ceil((ready - now).total_seconds())))
+          PY
+          )"
+          sleep "${WAIT_SECONDS}"
 
           set +e
           OLD_SESSION_RESULT="$(aws iam get-role \
@@ -254,12 +309,34 @@ jobs:
             echo "pre-cutoff role session still has permission after propagation" >&2
             exit 1
           fi
-          if ! grep -q "AccessDenied" <<< "${OLD_SESSION_RESULT}"; then
+          if ! grep -Eq \
+            'An error occurred \((AccessDenied|AccessDeniedException)\)' \
+            <<< "${OLD_SESSION_RESULT}"; then
             echo "pre-cutoff role-session probe failed for an unexpected reason" >&2
             exit 1
           fi
           printf '%s\n' "DENIED_AS_EXPECTED" > lab/old-session-probe.txt
           unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+
+          NEW_SESSION="$(aws sts assume-role \
+            --profile closurectl-mutation \
+            --role-arn "${TARGET_ROLE_ARN}" \
+            --role-session-name closurectl-post-cutoff-probe \
+            --duration-seconds 3600 \
+            --output json)"
+          NEW_ACCESS_KEY_ID="$(printf '%s' "${NEW_SESSION}" | jq -r '.Credentials.AccessKeyId')"
+          NEW_SECRET_ACCESS_KEY="$(printf '%s' "${NEW_SESSION}" | jq -r '.Credentials.SecretAccessKey')"
+          NEW_SESSION_TOKEN="$(printf '%s' "${NEW_SESSION}" | jq -r '.Credentials.SessionToken')"
+          echo "::add-mask::${NEW_ACCESS_KEY_ID}"
+          echo "::add-mask::${NEW_SECRET_ACCESS_KEY}"
+          echo "::add-mask::${NEW_SESSION_TOKEN}"
+          NEW_PROBE="$(AWS_ACCESS_KEY_ID="${NEW_ACCESS_KEY_ID}" \
+          AWS_SECRET_ACCESS_KEY="${NEW_SECRET_ACCESS_KEY}" \
+          AWS_SESSION_TOKEN="${NEW_SESSION_TOKEN}" \
+            aws iam get-role --role-name "${AWS_ROLE_NAME}" --output json --no-cli-pager \
+          )"
+          test "$(printf '%s' "${NEW_PROBE}" | jq -r '.Role.RoleId')" = "${EXPECTED_ROLE_ID}"
+          printf '%s\n' "ALLOWED_AS_EXPECTED" > lab/new-session-probe.txt
 
           closurectl observe \
             lab/authority-graph.json lab/closure-plan.json lab/execution-preview.json \

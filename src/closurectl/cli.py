@@ -12,7 +12,7 @@ from typing import Any, Sequence
 from . import __version__
 from .adapters.aws import collect_aws_inventory
 from .adapters.github import collect_github_inventory
-from .adapters.npm import collect_npm_inventory
+from .adapters.npm import collect_npm_inventory, require_supported_npm_version
 from .demo import closed_evidence, compromised_maintainer_graph
 from .errors import ClosureCtlError, ValidationError
 from .execution import (
@@ -20,6 +20,7 @@ from .execution import (
     create_execution_preview,
     observe_execution,
     read_execution_journal,
+    validate_execution_preview,
 )
 from .executors.aws import AwsExecutor
 from .executors.github import GitHubExecutor
@@ -28,6 +29,7 @@ from .incident import (
     build_authority_graph,
     create_incident_draft,
     validate_incident_draft,
+    validate_provider_inventory,
 )
 from .models import AuthorityGraph, ClosurePlan
 from .planner import plan_closure
@@ -230,8 +232,13 @@ def _parser() -> argparse.ArgumentParser:
     report.add_argument("graph", help="path to the authority graph JSON")
     report.add_argument("plan", help="path to the closure plan JSON")
     report.add_argument("receipt", help="path to the signed closure receipt JSON")
+    report.add_argument("evidence", help="path to the evidence signed into the receipt")
     report.add_argument("--public-key", required=True, help="Ed25519 public verification key")
     report.add_argument("--journal", help="optional append-only execution journal")
+    report.add_argument(
+        "--preview",
+        help="execution preview required when --journal is supplied",
+    )
     report.add_argument("-o", "--out", required=True, help="HTML report output path")
 
     demo = commands.add_parser("demo", help="generate and verify a self-contained demo incident")
@@ -277,6 +284,7 @@ def _provider_executors(plan: ClosurePlan) -> dict[str, Any]:
             api_url=os.environ.get("GITHUB_API_URL", "https://api.github.com"),
         )
     if "npm" in providers:
+        require_supported_npm_version()
         mutation_config = os.environ.get("CLOSURECTL_NPM_MUTATION_USERCONFIG", "")
         recovery_config = os.environ.get("CLOSURECTL_NPM_RECOVERY_USERCONFIG", "")
         if not mutation_config or not recovery_config:
@@ -303,7 +311,19 @@ def _emit_json(value: dict[str, Any]) -> None:
     print(json.dumps(value, ensure_ascii=False, sort_keys=True))
 
 
-def _prompt_candidate_selection(draft: dict[str, Any]) -> tuple[list[str], str]:
+def _configure_utf8_output() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8", errors="backslashreplace")
+            except (LookupError, OSError):
+                continue
+
+
+def _prompt_candidate_selection(draft: dict[str, Any]) -> list[str]:
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        raise ValidationError("incident wizard requires an interactive TTY")
     selected: list[str] = []
     print(f"incident: {draft['title']}")
     print(f"draft:    {draft['draft_digest']}")
@@ -316,19 +336,20 @@ def _prompt_candidate_selection(draft: dict[str, Any]) -> tuple[list[str], str]:
             print("  mandatory: incomplete inventory forces this blocking path")
             selected.append(candidate["candidate_id"])
             continue
-        try:
-            answer = input("  include this path? [y/N] ").strip().lower()
-        except EOFError as exc:
-            raise ValidationError("incident wizard input ended before review completed") from exc
-        if answer in {"y", "yes"}:
-            selected.append(candidate["candidate_id"])
-        elif answer not in {"", "n", "no"}:
-            raise ValidationError("incident wizard answers must be yes or no")
-    try:
-        confirmation = input("Type the exact draft digest to build the graph: ").strip()
-    except EOFError as exc:
-        raise ValidationError("incident wizard input ended before digest confirmation") from exc
-    return selected, confirmation
+        while True:
+            try:
+                answer = input("  include this path? [y/N] ").strip().lower()
+            except EOFError as exc:
+                raise ValidationError(
+                    "incident wizard input ended before review completed"
+                ) from exc
+            if answer in {"y", "yes"}:
+                selected.append(candidate["candidate_id"])
+                break
+            if answer in {"", "n", "no"}:
+                break
+            print("  answer yes or no")
+    return selected
 
 
 def _print_plan(plan: ClosurePlan) -> None:
@@ -483,6 +504,7 @@ def _execute(arguments: argparse.Namespace) -> int:
             if not arguments.profile:
                 raise ValidationError("set AWS_PROFILE or pass --profile")
             snapshot = collect_aws_inventory(arguments.role, profile=arguments.profile)
+        validate_provider_inventory(snapshot)
         write_json(arguments.out, snapshot)
         destination = str(Path(arguments.out).resolve())
         if arguments.json:
@@ -536,12 +558,30 @@ def _execute(arguments: argparse.Namespace) -> int:
         if arguments.incident_mode == "wizard":
             if arguments.json:
                 raise ValidationError("--json cannot be combined with the interactive wizard")
-            selected, confirmation = _prompt_candidate_selection(draft)
+            selected = _prompt_candidate_selection(draft)
+            graph = build_authority_graph(draft, selected, draft["draft_digest"])
+            print()
+            print("Final graph closure plan:")
+            _print_plan(plan_closure(graph))
+            try:
+                creation_confirmation = input(
+                    "Type CREATE GRAPH to write this authority graph: "
+                ).strip()
+            except EOFError as exc:
+                raise ValidationError(
+                    "incident wizard input ended before graph confirmation"
+                ) from exc
+            if creation_confirmation != "CREATE GRAPH":
+                raise ValidationError("incident wizard requires exact CREATE GRAPH confirmation")
         else:
             selected = arguments.select
             confirmation = arguments.confirm
-        graph = build_authority_graph(draft, selected, confirmation)
-        write_json(arguments.out, graph.to_dict())
+            graph = build_authority_graph(draft, selected, confirmation)
+        write_json(
+            arguments.out,
+            graph.to_dict(),
+            overwrite=arguments.incident_mode != "wizard",
+        )
         result = {
             "graph_digest": graph.digest,
             "nodes": len(graph.nodes),
@@ -622,23 +662,52 @@ def _execute(arguments: argparse.Namespace) -> int:
         return 0 if result["closed"] == result["total"] else 5
 
     if arguments.command == "report":
+        if bool(arguments.journal) != bool(arguments.preview):
+            raise ValidationError("report --journal and --preview must be supplied together")
+        output_identity = os.path.normcase(str(Path(arguments.out).resolve()))
+        input_paths = [
+            arguments.graph,
+            arguments.plan,
+            arguments.receipt,
+            arguments.evidence,
+            arguments.public_key,
+        ]
+        if arguments.journal:
+            input_paths.append(arguments.journal)
+        if arguments.preview:
+            input_paths.append(arguments.preview)
+        if output_identity in {os.path.normcase(str(Path(path).resolve())) for path in input_paths}:
+            raise ValidationError("report output must not overwrite or alias an input artifact")
         graph, plan = _load_graph_and_verified_plan(arguments.graph, arguments.plan)
         receipt = read_json(arguments.receipt)
+        evidence = read_json(arguments.evidence)
         verification = verify_receipt(receipt, arguments.public_key, plan)
         events = read_execution_journal(arguments.journal) if arguments.journal else []
-        write_html_report(
+        preview_digest = None
+        if arguments.preview:
+            preview = validate_execution_preview(
+                read_json(arguments.preview),
+                graph,
+                plan,
+                require_fresh=False,
+            )
+            preview_digest = preview["preview_digest"]
+        report_digest = write_html_report(
             arguments.out,
             render_html_report(
                 graph,
                 plan,
+                evidence,
                 receipt,
-                verification,
+                arguments.public_key,
                 journal_events=events,
+                preview_digest=preview_digest,
             ),
         )
         result = {
             "closure_state": verification["closure_state"],
             "receipt_digest": verification["receipt_digest"],
+            "report_digest": report_digest,
             "journal_events": len(events),
             "written": str(Path(arguments.out).resolve()),
         }
@@ -647,6 +716,7 @@ def _execute(arguments: argparse.Namespace) -> int:
         else:
             print(f"closure state: {result['closure_state']}")
             print("receipt signature: VALID")
+            print(f"report sha256: {result['report_digest']}")
             print(f"timeline events: {result['journal_events']}")
             print(f"written: {result['written']}")
         return 0 if verification["closure_state"] == "CLOSED" else 4
@@ -659,6 +729,7 @@ def _execute(arguments: argparse.Namespace) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    _configure_utf8_output()
     parser = _parser()
     try:
         return _execute(parser.parse_args(argv))

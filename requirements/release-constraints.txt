@@ -1,5 +1,7 @@
 # Reproducible build/test toolchain for closurectl releases.
+actionlint-py==1.7.7.24
 altgraph==0.17.5
+bandit==1.9.4
 build==1.6.1
 cffi==2.1.1
 cfn-lint==1.58.0
@@ -11,6 +13,7 @@ packaging==26.3
 pefile==2024.8.26
 pyinstaller==6.22.3
 pyinstaller-hooks-contrib==2026.7
+pip-audit==2.10.1
 pycparser==3.11
 pywin32-ctypes==0.2.3
 ruff==0.17.1

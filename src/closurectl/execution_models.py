@@ -17,9 +17,13 @@ PREVIEW_TTL_SECONDS = 900
 
 _REPOSITORY_PART = re.compile(r"^[A-Za-z0-9_.-]+$")
 _NUMERIC_ID = re.compile(r"^[1-9][0-9]*$")
-_NPM_TOKEN_ID = re.compile(r"^[A-Za-z0-9._-]{4,200}$")
+_NPM_TOKEN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{3,199}$")
 _AWS_ACCOUNT_ID = re.compile(r"^[0-9]{12}$")
 _AWS_ROLE_NAME = re.compile(r"^[A-Za-z0-9_+=,.@-]{1,64}$")
+_RFC3339 = re.compile(
+    r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+    r"(?:\.[0-9]+)?(?:Z|[+-][0-9]{2}:[0-9]{2})$"
+)
 
 OPERATION_PHASES = {
     ("github", "disable_workflow"): "stop_minting",
@@ -30,7 +34,7 @@ OPERATION_PHASES = {
 
 
 def parse_rfc3339(value: Any, field: str) -> datetime:
-    if not isinstance(value, str) or not value:
+    if not isinstance(value, str) or not _RFC3339.fullmatch(value):
         raise ValidationError(f"{field} must be an RFC 3339 timestamp")
     normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
     try:
@@ -85,8 +89,14 @@ def parse_execution_target(action: PlanAction) -> ExecutionTarget:
         parsed = urllib.parse.urlsplit(action.target)
     except ValueError as exc:
         raise ValidationError(f"invalid execution target for {action.action_id!r}") from exc
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValidationError(f"invalid execution target port for {action.action_id!r}") from exc
     if parsed.query or parsed.fragment or parsed.username or parsed.password:
         raise ValidationError("execution target must not contain credentials, query, or fragment")
+    if port is not None:
+        raise ValidationError("execution target must not contain a port")
 
     if action.provider == "github":
         if parsed.scheme != "github" or not parsed.hostname:
@@ -102,6 +112,8 @@ def parse_execution_target(action: PlanAction) -> ExecutionTarget:
             or not _REPOSITORY_PART.fullmatch(owner)
             or not _REPOSITORY_PART.fullmatch(parts[0])
             or not _NUMERIC_ID.fullmatch(parts[3])
+            or owner in {".", ".."}
+            or parts[0] in {".", ".."}
         ):
             raise ValidationError(
                 "GitHub targets must use github://OWNER/REPO/actions/{workflows|runs}/NUMERIC_ID"
@@ -111,6 +123,9 @@ def parse_execution_target(action: PlanAction) -> ExecutionTarget:
         if kind != expected_kind:
             raise ValidationError(f"{action.operation} requires a GitHub {expected_kind} target")
         repository = f"{owner}/{parts[0]}"
+        canonical = f"github://{repository}/actions/{kind}/{parts[3]}"
+        if action.target != canonical:
+            raise ValidationError(f"GitHub execution target must be canonical: {canonical}")
         return ExecutionTarget(
             provider="github",
             operation=action.operation,
@@ -133,8 +148,12 @@ def parse_execution_target(action: PlanAction) -> ExecutionTarget:
             len(parts) != 3
             or parts[:2] != ["iam", "roles"]
             or not _AWS_ROLE_NAME.fullmatch(parts[2])
+            or parts[2] in {".", ".."}
         ):
             raise ValidationError("AWS targets must use aws://ACCOUNT_ID/iam/roles/ROLE_NAME")
+        canonical = f"aws://{parsed.hostname}/iam/roles/{parts[2]}"
+        if action.target != canonical:
+            raise ValidationError(f"AWS execution target must be canonical: {canonical}")
         return ExecutionTarget(
             provider="aws",
             operation=action.operation,
@@ -153,6 +172,9 @@ def parse_execution_target(action: PlanAction) -> ExecutionTarget:
     parts = [urllib.parse.unquote(part) for part in parsed.path.split("/") if part]
     if len(parts) != 2 or parts[0] != "tokens" or not _NPM_TOKEN_ID.fullmatch(parts[1]):
         raise ValidationError("npm targets must use npm://registry.npmjs.org/tokens/FULL_TOKEN_ID")
+    canonical = f"npm://registry.npmjs.org/tokens/{parts[1]}"
+    if action.target != canonical:
+        raise ValidationError(f"npm execution target must be canonical: {canonical}")
     return ExecutionTarget(
         provider="npm",
         operation=action.operation,

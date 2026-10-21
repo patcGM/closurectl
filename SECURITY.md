@@ -51,7 +51,7 @@ closurectl demo --dir closurectl-demo
 
 ## Security posture
 
-Version 0.3.0 has attended live adapters for exact GitHub Actions workflow/run,
+Version 1.0.0 has attended live adapters for exact GitHub Actions workflow/run,
 npm token, and AWS IAM role targets. Execution still refuses to proceed without
 a fresh preview digest, independent observer/recovery credentials, and a new
 journal path. Inventory and observation commands remain read-only.
@@ -63,5 +63,7 @@ response is never treated as closure evidence.
 
 The AWS adapter supports only the standard AWS partition, exact IAM role
 targets, different STS principals for mutation and observation, and the
-standard `AWSRevokeOlderSessions` policy. Release publication is blocked until
-the protected AWS provider lab passes on the exact tagged commit.
+unique preview-bound `ClosureCtlRevokeOlderSessions-*` policy. It requires the
+same immutable IAM `RoleId` at apply and observation time and never overwrites
+`AWSRevokeOlderSessions`. Release publication is blocked until the protected
+AWS provider lab passes on the exact tagged commit.

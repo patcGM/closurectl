@@ -7,6 +7,7 @@ on:
 permissions:
   actions: read
   contents: read
+  pull-requests: read
 
 env:
   PIP_CONSTRAINT: requirements/release-constraints.txt
@@ -18,7 +19,7 @@ concurrency:
 jobs:
   gate:
     name: Validate release source
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     steps:
@@ -39,6 +40,11 @@ jobs:
         run: |
           VERSION="$(PYTHONPATH=src python -c 'from closurectl import __version__; print(__version__)')"
           test "v${VERSION}" = "${GITHUB_REF_NAME}"
+          test -f ".github/releases/${GITHUB_REF_NAME}.md"
+          if [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            test "${VERSION%%.*}" -ge 1
+            grep -Fq '"Development Status :: 5 - Production/Stable"' pyproject.toml
+          fi
           TAG_REF="$(curl --fail --silent --show-error \
             --header "Authorization: Bearer ${GH_API_TOKEN}" \
             --header "Accept: application/vnd.github+json" \
@@ -56,6 +62,45 @@ jobs:
           test "$(printf '%s' "${TAG_OBJECT}" | jq -r '.object.sha')" = "${GITHUB_SHA}"
           git fetch origin main
           git merge-base --is-ancestor "${GITHUB_SHA}" origin/main
+
+          CI_RUNS="$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer ${GH_API_TOKEN}" \
+            --header "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?branch=main&event=push&per_page=100")"
+          test "$(printf '%s' "${CI_RUNS}" | jq --arg sha "${GITHUB_SHA}" \
+            '[.workflow_runs[] | select(
+              .head_sha == $sha
+              and .head_branch == "main"
+              and .event == "push"
+              and .status == "completed"
+              and .conclusion == "success"
+            )] | length')" -ge 1
+
+          ASSOCIATED_PULLS="$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer ${GH_API_TOKEN}" \
+            --header "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls")"
+          PR_NUMBER="$(printf '%s' "${ASSOCIATED_PULLS}" | jq -r --arg sha "${GITHUB_SHA}" \
+            '[.[] | select(
+              .merged_at != null
+              and .base.ref == "main"
+              and .merge_commit_sha == $sha
+            )][0].number // empty')"
+          test -n "${PR_NUMBER}"
+          PR_HEAD="$(printf '%s' "${ASSOCIATED_PULLS}" | jq -r \
+            --argjson number "${PR_NUMBER}" \
+            '[.[] | select(.number == $number)][0].head.sha // empty')"
+          test -n "${PR_HEAD}"
+          REVIEWS="$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer ${GH_API_TOKEN}" \
+            --header "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/reviews?per_page=100")"
+          test "$(printf '%s' "${REVIEWS}" | jq -r --arg head "${PR_HEAD}" \
+            '[.[] | select(
+              (.user.login | ascii_downcase) == "test2gm"
+              and .commit_id == $head
+            )] | sort_by(.submitted_at) | last | .state // empty')" = "APPROVED"
+
           for WORKFLOW in provider-lab.yml aws-provider-lab.yml; do
             LAB_RUNS="$(curl --fail --silent --show-error \
               --header "Authorization: Bearer ${GH_API_TOKEN}" \
@@ -71,13 +116,15 @@ jobs:
           done
 
       - name: Install release tools
-        run: python -m pip install ".[dev]" cfn-lint twine cyclonedx-bom
+        run: python -m pip install ".[dev]" bandit cfn-lint pip-audit twine cyclonedx-bom
 
       - name: Run quality gate
         run: |
           ruff check .
           ruff format --check .
           cfn-lint labs/aws/cloudformation.yml
+          bandit -q -r src
+          python -m pip_audit --strict -r requirements/release-constraints.txt
           python -m coverage run -m unittest discover -s tests -v
           python -m coverage report
           closurectl demo --dir release-gate-demo
@@ -120,13 +167,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             name: closurectl-linux-x86_64
             output: ./dist/closurectl-linux-x86_64
           - os: ubuntu-24.04-arm
             name: closurectl-linux-arm64
             output: ./dist/closurectl-linux-arm64
-          - os: windows-latest
+          - os: windows-2025
             name: closurectl-windows-x86_64
             output: ./dist/closurectl-windows-x86_64.exe
           - os: macos-15-intel
@@ -193,7 +240,7 @@ jobs:
   publish:
     name: Publish GitHub release
     needs: [gate, binary]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       attestations: write
@@ -202,6 +249,9 @@ jobs:
     environment: release
 
     steps:
+      - name: Check out release notes
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
       - name: Download binaries
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -229,7 +279,12 @@ jobs:
         id: channel
         run: |
           if [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "prerelease=false" >> "${GITHUB_OUTPUT}"
+            VERSION="${GITHUB_REF_NAME#v}"
+            if [ "${VERSION%%.*}" -ge 1 ]; then
+              echo "prerelease=false" >> "${GITHUB_OUTPUT}"
+            else
+              echo "prerelease=true" >> "${GITHUB_OUTPUT}"
+            fi
           else
             echo "prerelease=true" >> "${GITHUB_OUTPUT}"
           fi
@@ -237,6 +292,6 @@ jobs:
       - name: Publish release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
-          generate_release_notes: true
+          body_path: .github/releases/${{ github.ref_name }}.md
           prerelease: ${{ steps.channel.outputs.prerelease }}
           files: release/*

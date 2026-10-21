@@ -7,7 +7,7 @@ name = "closurectl"
 dynamic = ["version"]
 description = "Plan and verify revocation closure after a developer identity compromise."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.15"
 license = "MIT"
 authors = [
   { name = "closurectl contributors" }
@@ -22,7 +22,7 @@ keywords = [
   "security-automation",
 ]
 classifiers = [
-  "Development Status :: 4 - Beta",
+  "Development Status :: 5 - Production/Stable",
   "Environment :: Console",
   "Intended Audience :: Developers",
   "Intended Audience :: Information Technology",
@@ -53,6 +53,11 @@ dev = [
 Homepage = "https://github.com/patcGM/closurectl"
 Issues = "https://github.com/patcGM/closurectl/issues"
 Documentation = "https://github.com/patcGM/closurectl#readme"
+Changelog = "https://github.com/patcGM/closurectl/blob/main/CHANGELOG.md"
+Download = "https://github.com/patcGM/closurectl/releases"
+Security = "https://github.com/patcGM/closurectl/security/policy"
+Source = "https://github.com/patcGM/closurectl"
+Support = "https://github.com/patcGM/closurectl/blob/main/SUPPORT.md"
 
 [project.scripts]
 closurectl = "closurectl.cli:main"

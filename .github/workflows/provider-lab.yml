@@ -37,7 +37,7 @@ env:
 jobs:
   preview:
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: provider-lab
 
@@ -55,6 +55,30 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24"
+
+      - name: Restrict preview to registered disposable targets
+        env:
+          REQUESTED_REPOSITORY: ${{ inputs.github_repository }}
+          REQUESTED_WORKFLOW_ID: ${{ inputs.github_workflow_id }}
+          REQUESTED_RUN_ID: ${{ inputs.github_run_id }}
+          REQUESTED_NPM_TOKEN_ID: ${{ inputs.npm_token_id }}
+          EXPECTED_REPOSITORY: ${{ secrets.LAB_GITHUB_REPOSITORY }}
+          EXPECTED_WORKFLOW_ID: ${{ secrets.LAB_GITHUB_WORKFLOW_ID }}
+          EXPECTED_RUN_ID: ${{ secrets.LAB_GITHUB_RUN_ID }}
+          EXPECTED_NPM_TOKEN_ID: ${{ secrets.LAB_NPM_TOKEN_ID }}
+          EXPECTED_NPM_ACCOUNT: ${{ secrets.LAB_NPM_ACCOUNT }}
+        run: |
+          set -euo pipefail
+          test -n "${EXPECTED_REPOSITORY}"
+          test -n "${EXPECTED_WORKFLOW_ID}"
+          test -n "${EXPECTED_RUN_ID}"
+          test -n "${EXPECTED_NPM_TOKEN_ID}"
+          test -n "${EXPECTED_NPM_ACCOUNT}"
+          test "${REQUESTED_REPOSITORY}" = "${EXPECTED_REPOSITORY}"
+          test "${REQUESTED_WORKFLOW_ID}" = "${EXPECTED_WORKFLOW_ID}"
+          test "${REQUESTED_RUN_ID}" = "${EXPECTED_RUN_ID}"
+          test "${REQUESTED_NPM_TOKEN_ID}" = "${EXPECTED_NPM_TOKEN_ID}"
+          case "${REQUESTED_REPOSITORY}" in patcGM/closurectl-lab-*) ;; *) exit 1 ;; esac
 
       - name: Install pinned lab build
         run: |
@@ -159,6 +183,24 @@ jobs:
             lab/authority-graph.json lab/closure-plan.json \
             --out lab/execution-preview.json
 
+      - name: Bind preview to disposable npm account
+        env:
+          EXPECTED_NPM_ACCOUNT: ${{ secrets.LAB_NPM_ACCOUNT }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+
+          preview = json.load(open("lab/execution-preview.json", encoding="utf-8"))
+          npm_actions = [
+              action for action in preview["actions"] if action["provider"] == "npm"
+          ]
+          if len(npm_actions) != 1:
+              raise SystemExit("preview must contain exactly one npm action")
+          if npm_actions[0]["provider_account"] != os.environ["EXPECTED_NPM_ACCOUNT"]:
+              raise SystemExit("npm preview account is not the registered disposable account")
+          PY
+
       - name: Remove credential configs
         if: always()
         run: rm -f "${RUNNER_TEMP}/mutation.npmrc" "${RUNNER_TEMP}/recovery.npmrc"
@@ -174,7 +216,7 @@ jobs:
   apply-and-observe:
     needs: preview
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     environment: provider-lab
 
@@ -196,7 +238,28 @@ jobs:
       - name: Confirm destructive disposable scope
         env:
           CONFIRMATION: ${{ inputs.destructive_confirmation }}
-        run: test "${CONFIRMATION}" = "DESTROY DISPOSABLE LAB CREDENTIALS"
+          REQUESTED_REPOSITORY: ${{ inputs.github_repository }}
+          REQUESTED_WORKFLOW_ID: ${{ inputs.github_workflow_id }}
+          REQUESTED_RUN_ID: ${{ inputs.github_run_id }}
+          REQUESTED_NPM_TOKEN_ID: ${{ inputs.npm_token_id }}
+          EXPECTED_REPOSITORY: ${{ secrets.LAB_GITHUB_REPOSITORY }}
+          EXPECTED_WORKFLOW_ID: ${{ secrets.LAB_GITHUB_WORKFLOW_ID }}
+          EXPECTED_RUN_ID: ${{ secrets.LAB_GITHUB_RUN_ID }}
+          EXPECTED_NPM_TOKEN_ID: ${{ secrets.LAB_NPM_TOKEN_ID }}
+          EXPECTED_NPM_ACCOUNT: ${{ secrets.LAB_NPM_ACCOUNT }}
+        run: |
+          set -euo pipefail
+          test "${CONFIRMATION}" = "DESTROY DISPOSABLE LAB CREDENTIALS"
+          test -n "${EXPECTED_REPOSITORY}"
+          test -n "${EXPECTED_WORKFLOW_ID}"
+          test -n "${EXPECTED_RUN_ID}"
+          test -n "${EXPECTED_NPM_TOKEN_ID}"
+          test -n "${EXPECTED_NPM_ACCOUNT}"
+          test "${REQUESTED_REPOSITORY}" = "${EXPECTED_REPOSITORY}"
+          test "${REQUESTED_WORKFLOW_ID}" = "${EXPECTED_WORKFLOW_ID}"
+          test "${REQUESTED_RUN_ID}" = "${EXPECTED_RUN_ID}"
+          test "${REQUESTED_NPM_TOKEN_ID}" = "${EXPECTED_NPM_TOKEN_ID}"
+          case "${REQUESTED_REPOSITORY}" in patcGM/closurectl-lab-*) ;; *) exit 1 ;; esac
 
       - name: Install pinned lab build
         run: |
@@ -208,6 +271,24 @@ jobs:
         with:
           name: provider-lab-preview-${{ github.sha }}
           path: lab
+
+      - name: Recheck reviewed npm account binding
+        env:
+          EXPECTED_NPM_ACCOUNT: ${{ secrets.LAB_NPM_ACCOUNT }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+
+          preview = json.load(open("lab/execution-preview.json", encoding="utf-8"))
+          npm_actions = [
+              action for action in preview["actions"] if action["provider"] == "npm"
+          ]
+          if len(npm_actions) != 1:
+              raise SystemExit("preview must contain exactly one npm action")
+          if npm_actions[0]["provider_account"] != os.environ["EXPECTED_NPM_ACCOUNT"]:
+              raise SystemExit("npm preview account is not the registered disposable account")
+          PY
 
       - name: Materialize isolated npm configs
         env:
