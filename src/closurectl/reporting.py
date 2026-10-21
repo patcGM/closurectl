@@ -2,16 +2,30 @@
 
 from __future__ import annotations
 
+import hashlib
 import html
+import re
+import unicodedata
 from pathlib import Path
 from typing import Any, Iterable
 
 from .errors import ValidationError
+from .execution_models import EXECUTION_SCHEMA_VERSION, parse_rfc3339
 from .models import AuthorityGraph, ClosurePlan
+from .receipts import validate_evidence_binding, verify_receipt
+from .serialization import atomic_write_bytes, digest_json
 
 
 def _escape(value: Any) -> str:
-    return html.escape(str(value), quote=True)
+    neutralized = "".join(
+        (
+            f"\\u{ord(character):04x}"
+            if unicodedata.category(character) in {"Cc", "Cf", "Cs"}
+            else character
+        )
+        for character in str(value)
+    )
+    return html.escape(neutralized, quote=True)
 
 
 def _state_class(value: str) -> str:
@@ -32,20 +46,95 @@ def _state_class(value: str) -> str:
 
 
 def _validate_journal_binding(
-    journal_events: Iterable[dict[str, Any]], plan: ClosurePlan
+    journal_events: Iterable[dict[str, Any]],
+    plan: ClosurePlan,
+    preview_digest: str | None,
 ) -> list[dict[str, Any]]:
     events = list(journal_events)
-    actions = {action.action_id for action in plan.actions}
+    if events and preview_digest is None:
+        raise ValidationError("report journal requires a validated execution preview")
+    actions = {action.action_id: action for action in plan.actions}
+    action_order = {action.action_id: index for index, action in enumerate(plan.actions)}
     preview_digests: set[str] = set()
-    for event in events:
+    previous_digest = ""
+    latest: dict[str, str] = {}
+    required_fields = {
+        "schema_version",
+        "sequence",
+        "at",
+        "preview_digest",
+        "plan_digest",
+        "action_id",
+        "phase",
+        "operation",
+        "target",
+        "state",
+        "summary",
+        "reference",
+        "previous_event_digest",
+        "event_digest",
+    }
+    transitions = {
+        None: {"PREVIEWED"},
+        "PREVIEWED": {"REQUESTED"},
+        "REQUESTED": {"RECONCILING"},
+        "RECONCILING": {"VERIFIED", "FAILED", "INDETERMINATE", "RECONCILING"},
+        "INDETERMINATE": {"RECONCILING"},
+        "VERIFIED": set(),
+        "FAILED": set(),
+    }
+    for index, event in enumerate(events, start=1):
+        if not isinstance(event, dict) or set(event) != required_fields:
+            raise ValidationError(f"report journal event {index} has an invalid shape")
+        string_fields = required_fields - {"sequence"}
+        if (
+            event.get("schema_version") != EXECUTION_SCHEMA_VERSION
+            or type(event.get("sequence")) is not int
+            or event["sequence"] != index
+            or not all(isinstance(event.get(field), str) for field in string_fields)
+        ):
+            raise ValidationError(f"report journal event {index} has invalid types")
+        if not event["summary"]:
+            raise ValidationError(f"report journal event {index} has an empty summary")
+        parse_rfc3339(event["at"], f"report journal event {index}.at")
+        if event["previous_event_digest"] != previous_digest:
+            raise ValidationError("report journal hash chain is invalid")
+        payload = {key: value for key, value in event.items() if key != "event_digest"}
+        if event["event_digest"] != digest_json(payload):
+            raise ValidationError("report journal event digest is invalid")
         if event.get("plan_digest") != plan.digest:
             raise ValidationError("report journal plan_digest does not match the plan")
-        if event.get("action_id") not in actions:
+        action = actions.get(event["action_id"])
+        if action is None:
             raise ValidationError("report journal references an unknown plan action")
-        preview_digest = event.get("preview_digest")
-        if not isinstance(preview_digest, str) or not preview_digest:
+        if (
+            event["phase"] != action.phase
+            or event["operation"] != f"{action.provider}.{action.operation}"
+            or event["target"] != action.target
+        ):
+            raise ValidationError("report journal event does not match its plan action")
+        event_preview_digest = event.get("preview_digest")
+        if not re.fullmatch(r"[a-f0-9]{64}", event_preview_digest):
             raise ValidationError("report journal preview_digest is invalid")
-        preview_digests.add(preview_digest)
+        if event_preview_digest != preview_digest:
+            raise ValidationError(
+                "report journal preview_digest does not match the supplied preview"
+            )
+        preview_digests.add(event_preview_digest)
+        previous_state = latest.get(action.action_id)
+        if event["state"] not in transitions.get(previous_state, set()):
+            raise ValidationError(
+                f"invalid report journal transition for {action.action_id}: "
+                f"{previous_state or 'START'} -> {event['state']}"
+            )
+        if previous_state is None:
+            for earlier in plan.actions[: action_order[action.action_id]]:
+                if latest.get(earlier.action_id) != "VERIFIED":
+                    raise ValidationError(
+                        "report journal starts a later action before earlier closure"
+                    )
+        latest[action.action_id] = event["state"]
+        previous_digest = event["event_digest"]
     if len(preview_digests) > 1:
         raise ValidationError("report journal contains more than one execution preview")
     return events
@@ -54,19 +143,23 @@ def _validate_journal_binding(
 def render_html_report(
     graph: AuthorityGraph,
     plan: ClosurePlan,
+    evidence: dict[str, Any],
     receipt: dict[str, Any],
-    verification: dict[str, str],
+    public_key_path: str | Path,
     *,
     journal_events: Iterable[dict[str, Any]] = (),
+    preview_digest: str | None = None,
 ) -> str:
     """Render only verified, escaped artifact data into a self-contained report."""
+    verification = verify_receipt(receipt, public_key_path, plan)
     if plan.graph_digest != graph.digest:
         raise ValidationError("report plan does not match the authority graph")
     if receipt.get("receipt_digest") != verification.get("receipt_digest"):
         raise ValidationError("report receipt has not been verified")
     if receipt.get("closure_state") != verification.get("closure_state"):
         raise ValidationError("report receipt state does not match verification")
-    events = _validate_journal_binding(journal_events, plan)
+    evidence_binding = validate_evidence_binding(plan, evidence, receipt)
+    events = _validate_journal_binding(journal_events, plan, preview_digest)
 
     observations = {
         observation["action_id"]: observation for observation in receipt["observations"]
@@ -168,6 +261,9 @@ def render_html_report(
         "<!doctype html>\n"
         '<html lang="en"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        '<meta http-equiv="Content-Security-Policy" content="'
+        "default-src 'none'; style-src 'unsafe-inline'; img-src 'none'; "
+        "font-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'\">"
         f"<title>{_escape(graph.title)} — closurectl report</title>"
         f"<style>{css}</style></head><body><main>"
         f"<h1>{_escape(graph.title)}</h1>"
@@ -201,6 +297,7 @@ def render_html_report(
         '<h2>Integrity</h2><div class="card integrity">'
         f"<code>graph sha256: {_escape(graph.digest)}</code>"
         f"<code>plan sha256: {_escape(plan.digest)}</code>"
+        f"<code>evidence sha256: {_escape(evidence_binding['evidence_digest'])}</code>"
         f"<code>receipt sha256: {_escape(receipt['receipt_digest'])}</code>"
         f"<code>signing key: {_escape(fingerprint)}</code>"
         "<p>Receipt signature: VALID</p></div>"
@@ -209,9 +306,7 @@ def render_html_report(
     )
 
 
-def write_html_report(path: str | Path, content: str) -> None:
-    destination = Path(path)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    temporary = destination.with_suffix(destination.suffix + ".tmp")
-    temporary.write_text(content, encoding="utf-8", newline="\n")
-    temporary.replace(destination)
+def write_html_report(path: str | Path, content: str) -> str:
+    encoded = content.encode("utf-8")
+    atomic_write_bytes(path, encoded)
+    return hashlib.sha256(encoded).hexdigest()

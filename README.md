@@ -116,16 +116,25 @@ Verify it against `SHA256SUMS.txt`:
 
 ```powershell
 # Windows PowerShell
-Get-FileHash .\closurectl-windows-x86_64.exe -Algorithm SHA256
+$expected = ((Select-String ' closurectl-windows-x86_64.exe$' .\SHA256SUMS.txt).Line -split '\s+')[0]
+$actual = (Get-FileHash .\closurectl-windows-x86_64.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($actual -ne $expected) { throw "SHA-256 mismatch" }
+gh attestation verify .\closurectl-windows-x86_64.exe --repo patcGM/closurectl `
+  --signer-workflow patcGM/closurectl/.github/workflows/release.yml
 .\closurectl-windows-x86_64.exe --version
 ```
 
 ```bash
-# Linux
-sha256sum closurectl-linux-x86_64
+# Linux: download every release asset first
+sha256sum -c SHA256SUMS.txt
+gh attestation verify closurectl-linux-x86_64 --repo patcGM/closurectl \
+  --signer-workflow patcGM/closurectl/.github/workflows/release.yml
 chmod +x closurectl-linux-x86_64
 ./closurectl-linux-x86_64 --version
 ```
+
+On macOS, use `shasum -a 256 -c SHA256SUMS.txt` and the same
+`gh attestation verify` command for the selected binary.
 
 The binaries are not yet code-signed or notarized. Build from the tagged
 source if your environment requires a trusted publisher identity.
@@ -133,7 +142,7 @@ source if your environment requires a trusted publisher identity.
 ### pipx
 
 ```bash
-pipx install "git+https://github.com/patcGM/closurectl.git@v0.3.0"
+pipx install "git+https://github.com/patcGM/closurectl.git@v1.0.0"
 closurectl --version
 ```
 
@@ -207,9 +216,14 @@ closurectl verify closure-receipt.json \
   --plan closure-plan.json
 
 closurectl report authority-graph.json closure-plan.json closure-receipt.json \
+  evidence.json \
   --public-key incident-signing.pub.pem \
   --out closure-report.html
 ```
+
+The report command verifies the separate evidence artifact against the signed
+receipt and prints the SHA-256 of the generated HTML. See
+[`docs/INCIDENT_REPORTS.md`](docs/INCIDENT_REPORTS.md).
 
 Keep the private key outside the affected host and out of the repository.
 
@@ -343,11 +357,13 @@ export CLOSURECTL_AWS_MUTATION_PROFILE="incident-mutation"
 export CLOSURECTL_AWS_OBSERVER_PROFILE="incident-observer"
 ```
 
-AWS role-session revocation installs the standard
-`AWSRevokeOlderSessions` inline deny policy with a cutoff 30 seconds after the
-request. It affects every session for the role issued before that cutoff, not
-one individual attacker session. Independent evidence remains
-`INDETERMINATE` during the five-minute IAM propagation window.
+AWS role-session revocation creates a unique
+`ClosureCtlRevokeOlderSessions-*` inline deny policy. Its name, cutoff,
+document digest, target, and immutable IAM `RoleId` are fixed by the confirmed
+preview; the shared `AWSRevokeOlderSessions` policy is never overwritten. It
+affects every session for the role issued before that cutoff, not one
+individual attacker session. Independent evidence requires that exact policy
+and remains `INDETERMINATE` during the five-minute IAM propagation window.
 
 Never pass an OTP in command-line arguments. If npm requires one, provide it
 through npm's protected environment/config mechanism and remove it
@@ -406,13 +422,14 @@ artifacts describe only declared scope.
 Read the full [threat model](docs/THREAT_MODEL.md) and
 [graph format](docs/GRAPH_FORMAT.md), and follow the
 [receipt key guidance](docs/RECEIPT_KEYS.md) and
-[AWS role-session guidance](docs/AWS_ROLE_SESSIONS.md) before using real
-incident data.
+[AWS role-session guidance](docs/AWS_ROLE_SESSIONS.md), review the
+[provider requirements](docs/PROVIDER_REQUIREMENTS.md), and understand the
+[compatibility policy](docs/COMPATIBILITY.md) before using real incident data.
 Machine-readable formats are published in [`schemas/`](schemas/).
 
 ## Project status
 
-Version 0.3.0 combines planning, guided incident modelling, independently
+Version 1.0.0 combines planning, guided incident modelling, independently
 observed live containment, and signed reporting:
 
 - authority graph validation;
@@ -426,12 +443,14 @@ observed live containment, and signed reporting:
 - independent provider evidence v2 and signing-key fingerprints.
 
 AWS and GitHub/npm publication are release-gated by protected disposable labs
-on the exact tagged commit. Planned work is tracked in [ROADMAP.md](ROADMAP.md).
+on the exact tagged commit. The 1.0.0 tag and release remain blocked until the
+final metadata commit passes those drills, full CI, and independent review.
+Planned work is tracked in [ROADMAP.md](ROADMAP.md).
 
 ## Contributing and security reports
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Do not open a public issue for a
-security vulnerability; follow [SECURITY.md](SECURITY.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [SUPPORT.md](SUPPORT.md). Do not open
+a public issue for a security vulnerability; follow [SECURITY.md](SECURITY.md).
 
 ## License
 

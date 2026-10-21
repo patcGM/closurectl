@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 import urllib.error
 import urllib.parse
@@ -11,13 +10,24 @@ from dataclasses import dataclass
 from typing import Any
 
 from .. import __version__
-from ..errors import AdapterError
+from ..errors import AdapterError, ValidationError
 from ..receipts import utc_now
+from ..serialization import parse_json_text
 
 REPOSITORY_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 REPOSITORY_PERMISSION_FIELDS = {"admin", "maintain", "push", "triage", "pull"}
 PAGE_SIZE = 100
 MAX_COLLECTION_ITEMS = 500
+MAX_RESPONSE_BYTES = 2_000_000
+
+
+def _response_body(raw_body: bytes) -> Any:
+    if not raw_body:
+        return None
+    try:
+        return parse_json_text(raw_body.decode("utf-8"), source="GitHub API response")
+    except (UnicodeDecodeError, ValidationError) as exc:
+        raise AdapterError("GitHub API returned an unreadable response") from exc
 
 
 def _https_origin(url: str) -> tuple[str, int]:
@@ -58,6 +68,7 @@ class GitHubResponse:
     body: Any
     scopes: tuple[str, ...]
     status: int = 200
+    has_next: bool = False
 
 
 class GitHubClient:
@@ -104,8 +115,10 @@ class GitHubClient:
         )
         try:
             with self._opener.open(request, timeout=self._timeout) as response:
-                raw_body = response.read()
-                body = json.loads(raw_body.decode("utf-8")) if raw_body else None
+                raw_body = response.read(MAX_RESPONSE_BYTES + 1)
+                if len(raw_body) > MAX_RESPONSE_BYTES:
+                    raise AdapterError("GitHub API response exceeded the safety limit")
+                body = _response_body(raw_body)
                 scopes = tuple(
                     sorted(
                         scope.strip()
@@ -116,13 +129,22 @@ class GitHubClient:
                 status = int(response.status)
                 if status not in accepted_statuses:
                     raise AdapterError(f"GitHub API returned unexpected HTTP {status}")
-                return GitHubResponse(body=body, scopes=scopes, status=status)
+                link = response.headers.get("Link", "")
+                has_next = any('rel="next"' in item for item in link.split(",") if item.strip())
+                return GitHubResponse(
+                    body=body,
+                    scopes=scopes,
+                    status=status,
+                    has_next=has_next,
+                )
         except urllib.error.HTTPError as exc:
             if exc.code in accepted_statuses:
-                raw_body = exc.read()
+                raw_body = exc.read(MAX_RESPONSE_BYTES + 1)
+                if len(raw_body) > MAX_RESPONSE_BYTES:
+                    raise AdapterError("GitHub API response exceeded the safety limit") from exc
                 try:
-                    body = json.loads(raw_body.decode("utf-8")) if raw_body else None
-                except (json.JSONDecodeError, UnicodeDecodeError):
+                    body = _response_body(raw_body)
+                except AdapterError:
                     body = None
                 return GitHubResponse(body=body, scopes=(), status=exc.code)
             if 300 <= exc.code < 400:
@@ -137,8 +159,6 @@ class GitHubClient:
             raise AdapterError(f"GitHub API returned HTTP {exc.code}") from exc
         except urllib.error.URLError as exc:
             raise AdapterError(f"cannot reach GitHub API: {exc.reason}") from exc
-        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            raise AdapterError("GitHub API returned an unreadable response") from exc
 
     def get(self, path: str) -> GitHubResponse:
         return self.request("GET", path)
@@ -181,7 +201,7 @@ def _collect_pages(
             if not isinstance(body, list):
                 raise AdapterError("GitHub collection response has an unexpected shape")
             items = body
-            total = max(total, len(collected) + len(items))
+            total = len(collected) + len(items)
         else:
             if not isinstance(body, dict) or not isinstance(body.get(collection_key), list):
                 raise AdapterError("GitHub collection response has an unexpected shape")
@@ -194,7 +214,15 @@ def _collect_pages(
             )
         remaining = MAX_COLLECTION_ITEMS - len(collected)
         collected.extend(items[:remaining])
-        if len(items) < PAGE_SIZE or len(collected) >= total:
+        if len(collected) >= MAX_COLLECTION_ITEMS:
+            if response.has_next or len(items) > remaining:
+                total = max(total, MAX_COLLECTION_ITEMS + 1)
+            break
+        if len(items) < PAGE_SIZE:
+            break
+        if collection_key is None and not response.has_next:
+            break
+        if collection_key is not None and len(collected) >= total:
             break
         page += 1
     return collected, total, total > len(collected), scopes
@@ -247,6 +275,12 @@ def collect_github_inventory(
         except AdapterError as exc:
             raise AdapterError(f"unexpected collection response for {repository}: {exc}") from exc
         scopes.update(workflow_scopes | run_scopes | key_scopes)
+        if not all(isinstance(item, dict) for item in workflow_items):
+            raise AdapterError(f"GitHub workflow collection is malformed for {repository}")
+        if not all(isinstance(item, dict) for item in run_items):
+            raise AdapterError(f"GitHub run collection is malformed for {repository}")
+        if not all(isinstance(item, dict) for item in key_items):
+            raise AdapterError(f"GitHub deploy-key collection is malformed for {repository}")
 
         workflows = [
             {
@@ -256,7 +290,6 @@ def collect_github_inventory(
                 "state": item.get("state"),
             }
             for item in workflow_items
-            if isinstance(item, dict)
         ]
         active_runs = [
             {
@@ -271,7 +304,7 @@ def collect_github_inventory(
                 "html_url": item.get("html_url"),
             }
             for item in run_items
-            if isinstance(item, dict) and item.get("status") != "completed"
+            if item.get("status") != "completed"
         ]
         deploy_keys = [
             {
@@ -282,7 +315,6 @@ def collect_github_inventory(
                 "created_at": item.get("created_at"),
             }
             for item in key_items
-            if isinstance(item, dict)
         ]
         raw_permissions = repo_response.body.get("permissions", {})
         permissions = (

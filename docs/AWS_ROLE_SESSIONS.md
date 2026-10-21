@@ -1,9 +1,13 @@
 # AWS IAM role-session containment
 
-`closurectl` implements the AWS-documented role-session revocation mechanism:
-it replaces one inline policy named `AWSRevokeOlderSessions` on one exact IAM
-role. The policy explicitly denies all actions and resources when
-`aws:TokenIssueTime` is earlier than the recorded cutoff.
+`closurectl` implements the AWS role-session deny mechanism without touching
+AWS's shared `AWSRevokeOlderSessions` name. Each confirmed preview derives one
+new inline policy named `ClosureCtlRevokeOlderSessions-<32 hex characters>` on
+one exact IAM role. The name includes a random 128-bit operation ID; that ID,
+cutoff, policy-document digest, target URI, action ID, and immutable IAM
+`RoleId` are bound together in the preview. The policy
+denies all actions and resources when `aws:TokenIssueTime` is earlier than that
+exact cutoff.
 
 This is a broad containment action. It affects every user and workload session
 for the role that was issued before the cutoff. It is not an individual-session
@@ -37,8 +41,7 @@ The mutation principal needs these permissions on the exact target role:
   "Action": [
     "iam:GetRole",
     "iam:GetRolePolicy",
-    "iam:PutRolePolicy",
-    "sts:AssumeRole"
+    "iam:PutRolePolicy"
   ],
   "Resource": "arn:aws:iam::123456789012:role/ProductionDeployer"
 }
@@ -46,12 +49,19 @@ The mutation principal needs these permissions on the exact target role:
 
 The observer needs only `iam:GetRole` and `iam:GetRolePolicy` on that role.
 Neither profile should use the target role itself as its recovery identity.
+The disposable lab mutation role additionally needs `sts:AssumeRole` on the
+target only to create its old/new canary sessions; closurectl does not call
+that API.
 
 For the disposable provider lab only, the target role trusts the mutation role
-and grants its own sessions `iam:GetRole` on itself. The workflow assumes a
-real pre-cutoff target-role session before mutation, waits for propagation, and
-requires that session's `iam:GetRole` probe to fail with `AccessDenied`. This
-tests data-plane denial in addition to observing the IAM policy.
+and grants its own sessions `iam:GetRole` on itself. After independent review
+of the exact preview, the workflow assumes a real target-role session before
+the bound cutoff, proves its baseline access, applies the preview-bound policy,
+waits past the cutoff and propagation interval, and
+requires that old session's `iam:GetRole` probe to fail specifically with
+`AccessDenied`. It then assumes a new post-cutoff session and requires the same
+probe to succeed. This tests both data-plane denial and preservation of new
+recovery access.
 
 `closurectl` invokes AWS CLI with `--profile`, strips access-key/session-token
 environment variables, disables pagers and auto-prompt, and persists only STS
@@ -62,17 +72,25 @@ identity ARNs plus allow-listed role metadata.
 Preview confirms:
 
 - both profiles use the target account and different STS principals;
-- both see the same exact role ARN and current revoke-policy digest;
+- both see the same exact role ARN, path, `RoleId`, and session duration;
 - the role is not service-linked;
-- any existing `AWSRevokeOlderSessions` document has the standard shape.
+- the derived `ClosureCtlRevokeOlderSessions-*` name is absent through both
+  profiles;
+- the exact future cutoff and deny-policy digest are recorded in the confirmed
+  preview.
 
-Apply writes a cutoff 30 seconds after the mutation request to account for IAM
-propagation. A timeout never causes a blind second `PutRolePolicy`; resume
-compares the current policy digest and cutoff with the confirmed preview and
-recorded `REQUESTED` event.
+Apply uses the cutoff already recorded by preview (30 seconds after the
+15-minute preview expiry); it never computes a replacement cutoff and refuses
+to mutate after that cutoff. Before mutation it requires the same `RoleId`,
+then performs at most one `PutRolePolicy`. A timeout never
+causes a blind second call: resume is read-only and reconciles the exact policy
+name, cutoff, and document digest. A deleted and recreated role is rejected
+even if its name and ARN are reused.
 
-Independent evidence remains `INDETERMINATE` until the standard policy is still
-visible through the observer profile five minutes after the cutoff.
+Independent evidence remains `INDETERMINATE` until the exact preview-bound
+policy is still visible through the observer profile five minutes after both
+the mutation request and cutoff. A different
+`ClosureCtlRevokeOlderSessions-*` policy does not satisfy the observation.
 
 ## What this does not close
 
@@ -86,10 +104,12 @@ visible through the observer profile five minutes after the cutoff.
 
 ## Rollback
 
-Do not automatically remove the policy. Doing so can restore authority to
-attacker sessions that have not expired. After the incident is contained,
-review the role and manually restore or delete `AWSRevokeOlderSessions` using
-an approved recovery procedure.
+Do not automatically remove any containment policy. Doing so can restore
+authority to attacker sessions that have not expired. `closurectl` contains no
+automatic delete or rollback path. After the incident is contained, review the
+role and manually delete the exact `ClosureCtlRevokeOlderSessions-*` policy
+named in the signed artifacts using an approved recovery procedure. Existing
+`AWSRevokeOlderSessions` policies are never overwritten or removed.
 
 The protected
 [`aws-provider-lab.yml`](../.github/workflows/aws-provider-lab.yml) workflow

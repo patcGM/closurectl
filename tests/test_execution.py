@@ -15,7 +15,7 @@ from closurectl.execution import (
     observe_execution,
     read_execution_journal,
 )
-from closurectl.execution_models import parse_execution_target
+from closurectl.execution_models import parse_execution_target, parse_rfc3339
 from closurectl.executors.base import ApplyResult, ObservationResult
 from closurectl.models import AuthorityGraph, PlanAction
 from closurectl.planner import plan_closure
@@ -185,6 +185,70 @@ class ExecutionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValidationError, "GitHub targets"):
             parse_execution_target(invalid)
 
+    def test_targets_reject_ports_noncanonical_paths_and_option_tokens(self) -> None:
+        base = self.plan.actions[0]
+        invalid_targets = (
+            "github://example:443/project/actions/workflows/42",
+            "github://example//project/actions/workflows/42",
+            "github://example/project/actions/workflows/42/",
+            "github://example/../actions/workflows/42",
+        )
+        for target in invalid_targets:
+            with self.subTest(target=target):
+                invalid = PlanAction(
+                    action_id=base.action_id,
+                    edge_id=base.edge_id,
+                    provider=base.provider,
+                    operation=base.operation,
+                    target=target,
+                    phase=base.phase,
+                    cost=base.cost,
+                    reason=base.reason,
+                )
+                with self.assertRaises(ValidationError):
+                    parse_execution_target(invalid)
+
+        aws = PlanAction(
+            action_id="close:aws",
+            edge_id="aws",
+            provider="aws",
+            operation="revoke_role_sessions",
+            target="aws://123456789012/iam/roles/.",
+            phase="revoke_descendants",
+            cost=1,
+            reason="test",
+        )
+        npm = PlanAction(
+            action_id="close:npm",
+            edge_id="npm",
+            provider="npm",
+            operation="revoke_token",
+            target="npm://registry.npmjs.org/tokens/--force",
+            phase="revoke_roots",
+            cost=1,
+            reason="test",
+        )
+        for invalid in (aws, npm):
+            with self.assertRaises(ValidationError):
+                parse_execution_target(invalid)
+
+    def test_rfc3339_parser_is_strict(self) -> None:
+        self.assertEqual(
+            parse_rfc3339("2026-10-21T12:00:00Z", "timestamp"),
+            self.now,
+        )
+        for value in (
+            "2026-10-21 12:00:00Z",
+            "2026-10-21T12:00:00z",
+            "2026-10-21T12:00Z",
+            "2026-10-21T12:00:00",
+            "2026-02-30T12:00:00Z",
+            "2026-10-21T12:00:00+24:00",
+        ):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValidationError, "RFC 3339"):
+                    parse_rfc3339(value, "timestamp")
+
     def test_confirmed_apply_writes_hash_chained_journal(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             journal = Path(directory) / "execution.jsonl"
@@ -352,6 +416,35 @@ class ExecutionTests(unittest.TestCase):
             )
             journal.write_text(content, encoding="utf-8")
             with self.assertRaisesRegex(ValidationError, "digest"):
+                read_execution_journal(journal)
+
+    def test_journal_rejects_duplicate_keys_and_float_sequences(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory) / "execution.jsonl"
+            apply_execution(
+                self.graph,
+                self.plan,
+                self.preview,
+                self.preview["preview_digest"],
+                journal,
+                self.executors,
+                now=lambda: self.now,
+            )
+            first_line = journal.read_text(encoding="utf-8").splitlines()[0]
+            journal.write_text(
+                first_line[:-1] + ',"sequence":1}\n',
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValidationError, "duplicate JSON"):
+                read_execution_journal(journal)
+
+            event = json.loads(first_line)
+            event["sequence"] = 1.0
+            event["event_digest"] = digest_json(
+                {key: value for key, value in event.items() if key != "event_digest"}
+            )
+            journal.write_text(json.dumps(event) + "\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValidationError, "sequence"):
                 read_execution_journal(journal)
 
     def test_rehashed_invalid_journal_transition_is_rejected(self) -> None:

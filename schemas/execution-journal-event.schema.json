@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/patcGM/closurectl/schemas/execution-journal-event.schema.json",
+  "$id": "https://raw.githubusercontent.com/patcGM/closurectl/v1.0.0/schemas/execution-journal-event.schema.json",
   "title": "closurectl append-only execution journal event",
   "type": "object",
   "additionalProperties": false,

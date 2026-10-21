@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +31,7 @@ FORBIDDEN_SECRET_FIELDS = {
     "signing_key",
     "token",
 }
+MAX_JSON_INTEGER = (1 << 63) - 1
 
 
 def canonical_json(value: Any) -> bytes:
@@ -76,16 +79,39 @@ def _object_without_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, An
     return result
 
 
+def _reject_non_finite_constant(value: str) -> None:
+    raise ValueError(f"non-finite JSON value: {value}")
+
+
+def _parse_bounded_integer(value: str) -> int:
+    parsed = int(value)
+    if not -MAX_JSON_INTEGER - 1 <= parsed <= MAX_JSON_INTEGER:
+        raise ValueError("JSON integer exceeds the signed 64-bit safety limit")
+    return parsed
+
+
+def parse_json_text(value: str, *, source: str = "JSON") -> Any:
+    try:
+        return json.loads(
+            value,
+            object_pairs_hook=_object_without_duplicate_keys,
+            parse_constant=_reject_non_finite_constant,
+            parse_int=_parse_bounded_integer,
+        )
+    except json.JSONDecodeError as exc:
+        raise ValidationError(
+            f"invalid JSON in {source} at line {exc.lineno}, column {exc.colno}"
+        ) from exc
+    except (ValueError, RecursionError) as exc:
+        raise ValidationError(f"invalid JSON value in {source}") from exc
+
+
 def read_json(path: str | Path, *, reject_secrets: bool = True) -> Any:
     try:
         with Path(path).open("r", encoding="utf-8") as handle:
-            value = json.load(handle, object_pairs_hook=_object_without_duplicate_keys)
+            value = parse_json_text(handle.read(), source=str(path))
     except FileNotFoundError as exc:
         raise ValidationError(f"file not found: {path}") from exc
-    except json.JSONDecodeError as exc:
-        raise ValidationError(
-            f"invalid JSON in {path} at line {exc.lineno}, column {exc.colno}"
-        ) from exc
     except UnicodeDecodeError as exc:
         raise ValidationError(f"JSON file is not valid UTF-8: {path}") from exc
     if reject_secrets:
@@ -93,13 +119,61 @@ def read_json(path: str | Path, *, reject_secrets: bool = True) -> Any:
     return value
 
 
-def write_json(path: str | Path, value: Any, *, reject_secrets: bool = True) -> None:
-    if reject_secrets:
-        reject_secret_fields(value)
+def atomic_write_bytes(
+    path: str | Path,
+    content: bytes,
+    *,
+    overwrite: bool = True,
+) -> None:
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    temporary = destination.with_suffix(destination.suffix + ".tmp")
-    with temporary.open("w", encoding="utf-8", newline="\n") as handle:
-        json.dump(value, handle, ensure_ascii=False, indent=2, sort_keys=True)
-        handle.write("\n")
-    temporary.replace(destination)
+    if not overwrite:
+        try:
+            descriptor = os.open(
+                destination,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o600,
+            )
+        except FileExistsError as exc:
+            raise ValidationError(f"refusing to overwrite existing file: {destination}") from exc
+        try:
+            with os.fdopen(descriptor, "wb") as handle:
+                descriptor = -1
+                handle.write(content)
+                handle.flush()
+                os.fsync(handle.fileno())
+        finally:
+            if descriptor != -1:
+                os.close(descriptor)
+        return
+
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=destination.parent,
+        prefix=f".{destination.name}.",
+        suffix=".tmp",
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            descriptor = -1
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, destination)
+    finally:
+        if descriptor != -1:
+            os.close(descriptor)
+        temporary.unlink(missing_ok=True)
+
+
+def write_json(
+    path: str | Path,
+    value: Any,
+    *,
+    reject_secrets: bool = True,
+    overwrite: bool = True,
+) -> None:
+    if reject_secrets:
+        reject_secret_fields(value)
+    rendered = json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    atomic_write_bytes(path, rendered.encode("utf-8"), overwrite=overwrite)

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/patcGM/closurectl/schemas/incident-draft.schema.json",
+  "$id": "https://raw.githubusercontent.com/patcGM/closurectl/v1.0.0/schemas/incident-draft.schema.json",
   "title": "closurectl incident draft",
   "type": "object",
   "additionalProperties": false,
@@ -221,6 +221,7 @@
         "summary",
         "assumption",
         "mandatory",
+        "provenance",
         "nodes",
         "edge"
       ],
@@ -247,6 +248,28 @@
         },
         "mandatory": {
           "type": "boolean"
+        },
+        "provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "source_digest",
+            "evidence_paths"
+          ],
+          "properties": {
+            "source_digest": {
+              "$ref": "#/$defs/digest"
+            },
+            "evidence_paths": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^(?:/(?:[^~/]|~[01])*)+$"
+              }
+            }
+          }
         },
         "nodes": {
           "type": "array",

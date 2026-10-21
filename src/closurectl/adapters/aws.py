@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import shutil
-import subprocess
+
+# The executable is resolved from PATH, argv is a list, and shell use is disabled.
+import subprocess  # nosec B404
 import tempfile
+from pathlib import Path
 from typing import Any
 
-from ..errors import AdapterError
+from ..errors import AdapterError, ValidationError
 from ..receipts import utc_now
+from ..serialization import parse_json_text
 
 MAX_ROLES = 50
 MAX_OUTPUT_BYTES = 2_000_000
@@ -90,35 +93,47 @@ def _run_aws(
     ]
     try:
         with tempfile.TemporaryDirectory(prefix="closurectl-aws-") as working_directory:
-            completed = subprocess.run(
-                command,
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                shell=False,
-                env=environment,
-                cwd=working_directory,
-            )
+            stdout_path = Path(working_directory) / "stdout"
+            stderr_path = Path(working_directory) / "stderr"
+            with stdout_path.open("w+b") as stdout_handle, stderr_path.open("w+b") as stderr_handle:
+                completed = subprocess.run(  # nosec B603
+                    command,
+                    check=False,
+                    stdout=stdout_handle,
+                    stderr=stderr_handle,
+                    timeout=timeout,
+                    shell=False,
+                    env=environment,
+                    cwd=working_directory,
+                )
+            with stdout_path.open("rb") as handle:
+                stdout_bytes = handle.read(MAX_OUTPUT_BYTES + 1)
+            with stderr_path.open("rb") as handle:
+                stderr_bytes = handle.read(MAX_OUTPUT_BYTES + 1)
     except subprocess.TimeoutExpired as exc:
         raise AdapterError("AWS CLI command timed out; reconcile before retrying") from exc
     except OSError as exc:
         raise AdapterError("AWS CLI could not be started") from exc
-    stdout_size = len(completed.stdout.encode("utf-8"))
-    stderr_size = len(completed.stderr.encode("utf-8"))
+    stdout_size = len(stdout_bytes)
+    stderr_size = len(stderr_bytes)
     if stdout_size > MAX_OUTPUT_BYTES or stderr_size > MAX_OUTPUT_BYTES:
         raise AdapterError("AWS CLI output exceeded the safety limit")
+    try:
+        stdout = stdout_bytes.decode("utf-8")
+        stderr = stderr_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise AdapterError("AWS CLI returned non-UTF-8 output") from exc
     if completed.returncode != 0:
-        match = _AWS_ERROR_CODE.search(completed.stderr)
+        match = _AWS_ERROR_CODE.search(stderr)
         code = match.group(1) if match else "AwsCliFailure"
         raise AwsCliError(code, f"AWS CLI command failed with {code}")
     if not expect_json:
-        return completed.stdout.strip()
-    if not completed.stdout.strip():
+        return stdout.strip()
+    if not stdout.strip():
         return None
     try:
-        return json.loads(completed.stdout)
-    except json.JSONDecodeError as exc:
+        return parse_json_text(stdout, source="AWS CLI output")
+    except ValidationError as exc:
         raise AdapterError("AWS CLI returned non-JSON output") from exc
 
 
@@ -216,7 +231,13 @@ def collect_aws_inventory(roles: list[str], *, profile: str) -> dict[str, Any]:
             raise AdapterError(f"AWS IAM returned a different role for {role_name}")
         arn = role.get("Arn")
         path = role.get("Path")
-        if not isinstance(arn, str) or not isinstance(path, str):
+        role_id = role.get("RoleId")
+        if (
+            not isinstance(arn, str)
+            or not isinstance(path, str)
+            or not isinstance(role_id, str)
+            or not role_id
+        ):
             raise AdapterError(f"AWS IAM role identity is incomplete for {role_name}")
         arn_parts = arn.split(":", 5)
         if len(arn_parts) != 6 or arn_parts[2] != "iam" or arn_parts[4] != identity["account"]:
@@ -255,9 +276,12 @@ def collect_aws_inventory(roles: list[str], *, profile: str) -> dict[str, Any]:
         results.append(
             {
                 "name": role_name,
+                "role_id": role_id,
                 "arn": arn,
                 "path": path,
-                "service_linked": path.startswith("/aws-service-role/"),
+                "service_linked": path.startswith(
+                    ("/aws-service-role/", "/aws-reserved/sso.amazonaws.com/")
+                ),
                 "max_session_duration": role.get("MaxSessionDuration"),
                 "created_at": role.get("CreateDate"),
                 "last_used_at": (

@@ -110,6 +110,19 @@ inventories. A proposal is not authority evidence: `incident wizard` or
 every path before a valid graph is written. Any truncated inventory adds a
 mandatory non-revocable gap.
 
+Inventories are validated against exact runtime shapes and must be no more than
+one hour old or 30 seconds in the future. Duplicate or conflicting provider
+resources are rejected. Each candidate records the SHA-256 digest of its source
+inventory and the exact RFC 6901 JSON Pointers used to derive it. Read-only npm
+tokens do not become publication candidates. GitHub workflow and run
+candidates use workflow/run-scoped sinks; inventory alone never upgrades them
+to repository or production access.
+
+The wizard requires a TTY, repeats invalid yes/no questions, prints the final
+computed closure plan, and writes only after the operator types `CREATE GRAPH`.
+It refuses to overwrite an existing output. Non-interactive `incident build`
+continues to require the exact draft digest.
+
 ## Enforcement phases
 
 Supported phases and execution order:

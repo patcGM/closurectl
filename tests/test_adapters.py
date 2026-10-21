@@ -11,11 +11,18 @@ from unittest.mock import patch
 from closurectl.adapters.github import (
     GitHubClient,
     GitHubResponse,
+    _collect_pages,
     _https_origin,
     _SameOriginRedirectHandler,
     collect_github_inventory,
 )
-from closurectl.adapters.npm import _run_npm, collect_npm_inventory
+from closurectl.adapters.npm import (
+    MAX_OUTPUT_BYTES,
+    _registry_url,
+    _run_npm,
+    collect_npm_inventory,
+    require_supported_npm_version,
+)
 from closurectl.errors import AdapterError
 
 
@@ -71,13 +78,71 @@ class AdapterTests(unittest.TestCase):
             def __exit__(self, *args):
                 return False
 
-            def read(self):
+            def read(self, amount=-1):
+                del amount
                 return b"{not-json"
 
         client = GitHubClient("credential", api_url="https://api.github.test")
         with patch.object(client._opener, "open", return_value=Response()):
             with self.assertRaisesRegex(AdapterError, "unreadable"):
                 client.get("/user")
+
+    def test_github_response_size_is_bounded(self) -> None:
+        class Response:
+            status = 200
+            headers: dict[str, str] = {}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self, amount=-1):
+                return b"x" * amount
+
+        client = GitHubClient("credential", api_url="https://api.github.test")
+        with patch.object(client._opener, "open", return_value=Response()):
+            with self.assertRaisesRegex(AdapterError, "safety limit"):
+                client.get("/user")
+
+    def test_github_pagination_boundaries(self) -> None:
+        class Client:
+            def __init__(self, count: int) -> None:
+                self.items = list(range(count))
+                self.calls = 0
+
+            def get(self, path: str) -> GitHubResponse:
+                del path
+                self.calls += 1
+                page = self.calls
+                start = (page - 1) * 100
+                end = min(start + 100, len(self.items))
+                return GitHubResponse(
+                    self.items[start:end],
+                    (),
+                    has_next=end < len(self.items),
+                )
+
+        expectations = {
+            99: (99, False, 1),
+            100: (100, False, 1),
+            101: (101, False, 2),
+            500: (500, False, 5),
+            501: (501, True, 5),
+        }
+        for count, (expected_total, truncated, calls) in expectations.items():
+            with self.subTest(count=count):
+                client = Client(count)
+                items, total, was_truncated, _ = _collect_pages(
+                    client,
+                    "/repos/example/project/keys?per_page=100",
+                    collection_key=None,
+                )
+                self.assertEqual(len(items), min(count, 500))
+                self.assertEqual(total, expected_total)
+                self.assertEqual(was_truncated, truncated)
+                self.assertEqual(client.calls, calls)
 
     @patch("closurectl.adapters.github.GitHubClient.get")
     def test_github_inventory_allowlists_metadata(self, get) -> None:
@@ -130,6 +195,7 @@ class AdapterTests(unittest.TestCase):
     @patch("closurectl.adapters.npm._run_npm")
     def test_npm_inventory_discards_partial_credential_keys(self, run_npm) -> None:
         run_npm.side_effect = [
+            "11.18.0",
             [
                 {
                     "id": "credential-id",
@@ -148,13 +214,32 @@ class AdapterTests(unittest.TestCase):
         self.assertNotIn("plaintext-should-never-appear", rendered)
         self.assertIn("credential-id", rendered)
 
+    def test_npm_registry_rejects_invalid_ports(self) -> None:
+        for registry in (
+            "https://registry.npmjs.org:invalid",
+            "https://registry.npmjs.org:65536",
+        ):
+            with self.subTest(registry=registry):
+                with self.assertRaisesRegex(AdapterError, "invalid"):
+                    _registry_url(registry)
+
+    @patch("closurectl.adapters.npm._run_npm", return_value="11.17.0")
+    def test_npm_cli_version_is_exact(self, run_npm) -> None:
+        del run_npm
+        with self.assertRaisesRegex(AdapterError, "11.18.0 is required"):
+            require_supported_npm_version()
+
     @patch("closurectl.adapters.npm.subprocess.run")
     @patch("closurectl.adapters.npm.shutil.which", return_value="npm")
     def test_npm_child_receives_only_allowlisted_environment(self, which, run) -> None:
         del which
-        run.return_value.returncode = 0
-        run.return_value.stdout = "{}"
-        run.return_value.stderr = ""
+
+        def complete(*args, **kwargs):
+            del args
+            kwargs["stdout"].write(b"{}")
+            return type("Completed", (), {"returncode": 0})()
+
+        run.side_effect = complete
         with patch.dict(
             os.environ,
             {
@@ -168,6 +253,26 @@ class AdapterTests(unittest.TestCase):
         self.assertNotIn("GITHUB_TOKEN", child_environment)
         self.assertNotIn("CLOSURECTL_GITHUB_OBSERVER_TOKEN", child_environment)
         self.assertNotIn("NPM_CONFIG_OTP", child_environment)
+
+    @patch("closurectl.adapters.npm.subprocess.run")
+    @patch("closurectl.adapters.npm.shutil.which", return_value="npm")
+    def test_npm_stdout_and_stderr_are_bounded(self, which, run) -> None:
+        del which
+        for stream in ("stdout", "stderr"):
+            with self.subTest(stream=stream):
+
+                def complete(*args, **kwargs):
+                    del args
+                    kwargs["stdout"].write(
+                        b"{}" if stream == "stderr" else b"x" * (MAX_OUTPUT_BYTES + 1)
+                    )
+                    if stream == "stderr":
+                        kwargs["stderr"].write(b"x" * (MAX_OUTPUT_BYTES + 1))
+                    return type("Completed", (), {"returncode": 0})()
+
+                run.side_effect = complete
+                with self.assertRaisesRegex(AdapterError, "safety limit"):
+                    _run_npm(["whoami", "--json"])
 
 
 if __name__ == "__main__":

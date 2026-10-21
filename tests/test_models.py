@@ -57,6 +57,21 @@ class AuthorityGraphTests(unittest.TestCase):
             with self.assertRaisesRegex(ValidationError, "duplicate JSON"):
                 read_json(path)
 
+    def test_malformed_non_finite_and_huge_json_values_are_rejected(self) -> None:
+        cases = {
+            "malformed": '{"value":',
+            "nan": '{"value":NaN}',
+            "positive-infinity": '{"value":Infinity}',
+            "huge-integer": '{"value":9223372036854775808}',
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            for name, content in cases.items():
+                with self.subTest(name=name):
+                    path = Path(directory) / f"{name}.json"
+                    path.write_text(content, encoding="utf-8")
+                    with self.assertRaisesRegex(ValidationError, "invalid JSON"):
+                        read_json(path)
+
     def test_non_utf8_json_is_a_validation_error(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "invalid.json"

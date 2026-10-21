@@ -40,10 +40,12 @@ provider request is used as closure evidence.
 - [x] interactive incident wizard and exact non-interactive candidate selection
 - [x] deterministic offline HTML report and execution timeline
 - [x] allow-listed AWS IAM role and GitHub OIDC trust inventory
-- [x] exact `AWSRevokeOlderSessions` mutation with independent observation
+- [x] unique preview-bound AWS role-session deny with independent observation
 - [x] protected disposable AWS/OIDC provider-lab workflow
 - [x] Linux arm64 and native macOS arm64/x86-64 release matrices
+- [ ] successful disposable GitHub/npm drill on the 1.0.0 release commit
 - [ ] successful disposable AWS role-session drill on the release commit
+- [ ] independent 1.0.0 review from `test2GM`
 - [ ] containment SLO measurement
 - [ ] clean-machine recovery readiness checks
 - [x] retain exact preview/confirm controls without a hidden feature flag
@@ -61,9 +63,10 @@ Live mutations are not assigned a release until the project has:
 - two-person review for every destructive provider operation.
 
 The GitHub Actions, npm token, and AWS role-session adapters remain attended
-and exact-target only. AWS writes only the standard `AWSRevokeOlderSessions`
-inline policy to one exact role, and release publication remains gated until
-its disposable live drill passes.
+and exact-target only. AWS writes one unique
+`ClosureCtlRevokeOlderSessions-*` inline policy bound to the exact role ID and
+confirmed preview, and release publication remains gated until its disposable
+live drill passes.
 
 No generic “revoke everything” command is planned.
 

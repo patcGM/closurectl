@@ -14,6 +14,7 @@ from closurectl.incident import (
     validate_incident_draft,
 )
 from closurectl.planner import plan_closure
+from closurectl.receipts import utc_now
 from closurectl.serialization import read_json, write_json
 
 
@@ -46,7 +47,7 @@ def github_inventory(*, truncated: bool = False) -> dict:
                         "state": "disabled_manually",
                     },
                 ],
-                "workflow_count": 2,
+                "workflow_count": 3 if truncated else 2,
                 "workflow_results_truncated": truncated,
                 "active_runs": [
                     {
@@ -120,6 +121,7 @@ def aws_inventory() -> dict:
         "roles": [
             {
                 "name": "ProductionDeployer",
+                "role_id": "AROAEXAMPLEPRODUCTION",
                 "arn": "arn:aws:iam::123456789012:role/ProductionDeployer",
                 "path": "/",
                 "service_linked": False,
@@ -170,6 +172,16 @@ class IncidentDraftTests(unittest.TestCase):
             candidate_ids,
         )
         self.assertNotIn("github:example/project:disable-workflow:43", candidate_ids)
+        for candidate in draft["candidates"]:
+            self.assertRegex(candidate["provenance"]["source_digest"], r"^[a-f0-9]{64}$")
+            self.assertTrue(candidate["provenance"]["evidence_paths"])
+        workflow = next(
+            item
+            for item in draft["candidates"]
+            if item["candidate_id"] == "github:example/project:disable-workflow:42"
+        )
+        self.assertIn("workflow", workflow["nodes"][1]["label"].lower())
+        self.assertNotIn("repository access", workflow["nodes"][1]["label"].lower())
 
         selected = [
             "github:example/project:disable-workflow:42",
@@ -237,7 +249,9 @@ class IncidentDraftTests(unittest.TestCase):
             inventory_path = root / "github.json"
             draft_path = root / "draft.json"
             graph_path = root / "graph.json"
-            write_json(inventory_path, github_inventory())
+            inventory = github_inventory()
+            inventory["collected_at"] = utc_now()
+            write_json(inventory_path, inventory)
             self.assertEqual(
                 main(
                     [
@@ -278,7 +292,9 @@ class IncidentDraftTests(unittest.TestCase):
         inventory = github_inventory()
         inventory["repositories"][0]["permissions"] = {"pull": True}
         inventory["repositories"][0]["active_runs"] = []
+        inventory["repositories"][0]["run_count_scanned"] = 0
         inventory["repositories"][0]["deploy_keys"] = []
+        inventory["repositories"][0]["deploy_key_count"] = 0
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             draft = create_incident_draft(
@@ -289,7 +305,11 @@ class IncidentDraftTests(unittest.TestCase):
             draft_path = root / "draft.json"
             graph_path = root / "graph.json"
             write_json(draft_path, draft)
-            with patch("builtins.input", side_effect=["yes", draft["draft_digest"]]):
+            with (
+                patch("closurectl.cli.sys.stdin.isatty", return_value=True),
+                patch("closurectl.cli.sys.stdout.isatty", return_value=True),
+                patch("builtins.input", side_effect=["invalid", "yes", "CREATE GRAPH"]),
+            ):
                 result = main(
                     [
                         "incident",
@@ -301,6 +321,116 @@ class IncidentDraftTests(unittest.TestCase):
                 )
             self.assertEqual(result, 0)
             self.assertEqual(len(read_json(graph_path)["edges"]), 1)
+
+    def test_inventory_freshness_future_and_strict_truncation(self) -> None:
+        stale = github_inventory()
+        stale["collected_at"] = "2026-10-21T10:00:00Z"
+        with self.assertRaisesRegex(ValidationError, "older than"):
+            create_incident_draft(
+                "Stale",
+                [stale],
+                now=lambda: "2026-10-21T12:02:00Z",
+            )
+
+        future = github_inventory()
+        future["collected_at"] = "2026-10-21T12:03:00Z"
+        with self.assertRaisesRegex(ValidationError, "future"):
+            create_incident_draft(
+                "Future",
+                [future],
+                now=lambda: "2026-10-21T12:02:00Z",
+            )
+
+        malformed = github_inventory()
+        malformed["repositories"][0]["workflow_results_truncated"] = 1
+        with self.assertRaisesRegex(ValidationError, "true or false"):
+            create_incident_draft(
+                "Malformed",
+                [malformed],
+                now=lambda: "2026-10-21T12:02:00Z",
+            )
+
+    def test_readonly_npm_tokens_do_not_create_publication_candidates(self) -> None:
+        inventory = npm_inventory()
+        inventory["credential_metadata"][0]["readonly"] = True
+        draft = create_incident_draft(
+            "Readonly npm token",
+            [inventory],
+            now=lambda: "2026-10-21T12:02:00Z",
+        )
+        self.assertFalse(
+            any(candidate["resource_kind"] == "token" for candidate in draft["candidates"])
+        )
+
+    def test_duplicate_and_conflicting_inventory_resources_are_rejected(self) -> None:
+        duplicate = github_inventory()
+        duplicate["repositories"].append(copy.deepcopy(duplicate["repositories"][0]))
+        with self.assertRaisesRegex(ValidationError, "duplicate GitHub repository"):
+            create_incident_draft(
+                "Duplicate",
+                [duplicate],
+                now=lambda: "2026-10-21T12:02:00Z",
+            )
+
+        conflict = github_inventory()
+        conflict["repositories"][0]["default_branch"] = "release"
+        with self.assertRaisesRegex(ValidationError, "duplicate or conflicting"):
+            create_incident_draft(
+                "Conflict",
+                [github_inventory(), conflict],
+                now=lambda: "2026-10-21T12:02:00Z",
+            )
+
+    def test_wizard_requires_tty_and_refuses_overwrite(self) -> None:
+        inventory = github_inventory()
+        draft = create_incident_draft(
+            "Wizard safety",
+            [inventory],
+            now=lambda: "2026-10-21T12:02:00Z",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            draft_path = root / "draft.json"
+            output_path = root / "graph.json"
+            write_json(draft_path, draft)
+            with (
+                patch("closurectl.cli.sys.stdin.isatty", return_value=False),
+                patch("closurectl.cli.sys.stdout.isatty", return_value=True),
+            ):
+                self.assertEqual(
+                    main(
+                        [
+                            "incident",
+                            "wizard",
+                            str(draft_path),
+                            "--out",
+                            str(output_path),
+                        ]
+                    ),
+                    2,
+                )
+            output_path.write_text("do not replace", encoding="utf-8")
+            with (
+                patch("closurectl.cli.sys.stdin.isatty", return_value=True),
+                patch("closurectl.cli.sys.stdout.isatty", return_value=True),
+                patch(
+                    "builtins.input",
+                    side_effect=["yes", "no", "no", "no", "CREATE GRAPH"],
+                ),
+            ):
+                self.assertEqual(
+                    main(
+                        [
+                            "incident",
+                            "wizard",
+                            str(draft_path),
+                            "--out",
+                            str(output_path),
+                        ]
+                    ),
+                    2,
+                )
+            self.assertEqual(output_path.read_text(encoding="utf-8"), "do not replace")
 
 
 if __name__ == "__main__":

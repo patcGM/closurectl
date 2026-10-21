@@ -1,0 +1,39 @@
+name: Support request
+description: Ask a sanitized installation, compatibility, or workflow question.
+title: "support: "
+labels: ["support"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include credentials, account identifiers, or private incident
+        data. Vulnerabilities must use GitHub private security advisories.
+  - type: input
+    id: version
+    attributes:
+      label: closurectl version
+      placeholder: "closurectl 1.0.0"
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: OS, architecture, and Python version or release binary name.
+    validations:
+      required: true
+  - type: textarea
+    id: question
+    attributes:
+      label: Sanitized question
+    validations:
+      required: true
+  - type: checkboxes
+    id: routing
+    attributes:
+      label: Routing check
+      options:
+        - label: I removed credentials and private incident data.
+          required: true
+        - label: This is not a vulnerability or an emergency response request.
+          required: true

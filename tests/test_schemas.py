@@ -121,7 +121,7 @@ class SchemaCompatibilityTests(unittest.TestCase):
             "collected_at": "2026-10-21T12:00:00Z",
             "credential_handle": "npm-cli-current-user",
             "registry": "https://registry.npmjs.org",
-            "credential_metadata": [{"id": "token-id-123", "name": "release"}],
+            "credential_metadata": [{"id": "token-id-123", "name": "release", "readonly": False}],
             "packages": [],
             "limitations": ["bounded"],
         }

@@ -87,7 +87,18 @@ class GitHubExecutor:
 
     def preview(self, action: PlanAction, target: ExecutionTarget) -> dict[str, Any]:
         binding = self.binding(action, target)
-        resource = self._safe_resource(target, self._mutation.get(self._path(target)).body)
+        path = self._path(target)
+        resource = self._safe_resource(target, self._mutation.get(path).body)
+        try:
+            observer_resource = self._safe_resource(target, self._observer.get(path).body)
+        except (AdapterError, ExecutionError) as exc:
+            raise ExecutionError(
+                f"GitHub observer cannot read the exact target during preview: {exc}"
+            ) from exc
+        if observer_resource != resource:
+            raise ExecutionError(
+                "GitHub mutation and observer identities see different target state"
+            )
         current_state = (
             str(resource["state"])
             if target.resource_kind == "workflow"

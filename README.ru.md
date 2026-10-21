@@ -67,22 +67,31 @@ arm64/x86-64. Сравните SHA-256 файла со значением из `
 
 ```powershell
 # Windows PowerShell
-Get-FileHash .\closurectl-windows-x86_64.exe -Algorithm SHA256
+$expected = ((Select-String ' closurectl-windows-x86_64.exe$' .\SHA256SUMS.txt).Line -split '\s+')[0]
+$actual = (Get-FileHash .\closurectl-windows-x86_64.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($actual -ne $expected) { throw "SHA-256 mismatch" }
+gh attestation verify .\closurectl-windows-x86_64.exe --repo patcGM/closurectl `
+  --signer-workflow patcGM/closurectl/.github/workflows/release.yml
 .\closurectl-windows-x86_64.exe --version
 ```
 
 ```bash
-# Linux
-sha256sum closurectl-linux-x86_64
+# Linux: сначала загрузите все release assets
+sha256sum -c SHA256SUMS.txt
+gh attestation verify closurectl-linux-x86_64 --repo patcGM/closurectl \
+  --signer-workflow patcGM/closurectl/.github/workflows/release.yml
 chmod +x closurectl-linux-x86_64
 ./closurectl-linux-x86_64 --version
 ```
+
+На macOS используйте `shasum -a 256 -c SHA256SUMS.txt`, затем ту же команду
+`gh attestation verify` для выбранного binary.
 
 Бинарники пока не подписаны сертификатом разработчика и не notarized. Другой
 вариант установки с привязкой к конкретному релизу:
 
 ```bash
-pipx install "git+https://github.com/patcGM/closurectl.git@v0.3.0"
+pipx install "git+https://github.com/patcGM/closurectl.git@v1.0.0"
 ```
 
 ## Основной процесс
@@ -128,9 +137,13 @@ closurectl verify closure-receipt.json `
   --plan closure-plan.json
 
 closurectl report authority-graph.json closure-plan.json closure-receipt.json `
+  evidence.json `
   --public-key incident-signing.pub.pem `
   --out closure-report.html
 ```
+
+Команда отдельно сверяет evidence с подписанным receipt и печатает SHA-256
+созданного HTML. Подробности: [`docs/INCIDENT_REPORTS.md`](docs/INCIDENT_REPORTS.md).
 
 Приватный ключ нельзя хранить на заражённой машине или добавлять в git.
 
@@ -238,11 +251,13 @@ $env:CLOSURECTL_AWS_MUTATION_PROFILE = "incident-mutation"
 $env:CLOSURECTL_AWS_OBSERVER_PROFILE = "incident-observer"
 ```
 
-AWS executor устанавливает стандартную inline policy
-`AWSRevokeOlderSessions` и отсекает все sessions роли, выпущенные до cutoff
-через 30 секунд после mutation request. Это не точечный logout одного
-атакующего. До окончания пятиминутного IAM propagation window evidence остаётся
-`INDETERMINATE`.
+AWS executor создаёт уникальную inline policy
+`ClosureCtlRevokeOlderSessions-*`. Её имя, cutoff, digest документа, target и
+неизменяемый IAM `RoleId` фиксируются подтверждённым preview; общая policy
+`AWSRevokeOlderSessions` никогда не перезаписывается. Действие отсекает все
+sessions роли, выпущенные до cutoff, а не одну session атакующего. До окончания
+пятиминутного IAM propagation window evidence остаётся `INDETERMINATE` и
+должно видеть именно эту policy.
 
 OTP нельзя передавать аргументом CLI. Если npm требует OTP, используйте
 защищённую переменную/config npm и удалите её сразу после операции.
@@ -302,7 +317,10 @@ execution/evidence, `130` — прерывание. Глобальный `--json
 [модель угроз](docs/THREAT_MODEL.md) и
 [формат графа](docs/GRAPH_FORMAT.md), а также
 [правила работы с receipt keys](docs/RECEIPT_KEYS.md) и
-[AWS role-session containment](docs/AWS_ROLE_SESSIONS.md).
+[AWS role-session containment](docs/AWS_ROLE_SESSIONS.md). Точные permissions и
+версии provider CLI описаны в
+[`docs/PROVIDER_REQUIREMENTS.md`](docs/PROVIDER_REQUIREMENTS.md), стабильные
+гарантии — в [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md).
 
 ## Разработка
 
@@ -312,7 +330,8 @@ python -m ruff check .
 python -m unittest discover -s tests -v
 ```
 
-Правила участия находятся в [CONTRIBUTING.md](CONTRIBUTING.md), политика
-безопасности — в [SECURITY.md](SECURITY.md).
+Правила участия находятся в [CONTRIBUTING.md](CONTRIBUTING.md), поддержка — в
+[SUPPORT.md](SUPPORT.md), политика безопасности — в
+[SECURITY.md](SECURITY.md).
 
 Лицензия: MIT.

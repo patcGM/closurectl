@@ -2,29 +2,33 @@
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import shutil
-import subprocess
+
+# The executable is resolved from PATH, argv is a list, and shell use is disabled.
+import subprocess  # nosec B404
 import tempfile
 import urllib.parse
 from pathlib import Path
 from typing import Any
 
-from ..errors import AdapterError
+from ..errors import AdapterError, ValidationError
 from ..receipts import utc_now
+from ..serialization import parse_json_text
 
 PACKAGE_PATTERN = re.compile(r"^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$")
 MAX_PACKAGES = 50
 MAX_ITEMS = 1_000
 MAX_OUTPUT_BYTES = 2_000_000
 DEFAULT_REGISTRY = "https://registry.npmjs.org"
+SUPPORTED_NPM_VERSION = "11.18.0"
 
 
 def _registry_url(value: str) -> str:
     try:
         parsed = urllib.parse.urlsplit(value)
+        parsed.port
     except ValueError as exc:
         raise AdapterError("npm registry URL is invalid") from exc
     if (
@@ -81,29 +85,41 @@ def _run_npm(
             empty_global_config = Path(working_directory) / "global.npmrc"
             empty_global_config.write_text("", encoding="utf-8")
             environment["NPM_CONFIG_GLOBALCONFIG"] = str(empty_global_config)
-            completed = subprocess.run(
-                [executable, *arguments],
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                shell=False,
-                env=environment,
-                cwd=working_directory,
-            )
+            stdout_path = Path(working_directory) / "stdout"
+            stderr_path = Path(working_directory) / "stderr"
+            with stdout_path.open("w+b") as stdout_handle, stderr_path.open("w+b") as stderr_handle:
+                completed = subprocess.run(  # nosec B603
+                    [executable, *arguments],
+                    check=False,
+                    stdout=stdout_handle,
+                    stderr=stderr_handle,
+                    timeout=timeout,
+                    shell=False,
+                    env=environment,
+                    cwd=working_directory,
+                )
+            with stdout_path.open("rb") as handle:
+                stdout_bytes = handle.read(MAX_OUTPUT_BYTES + 1)
+            with stderr_path.open("rb") as handle:
+                stderr_bytes = handle.read(MAX_OUTPUT_BYTES + 1)
     except subprocess.TimeoutExpired as exc:
         raise AdapterError("npm command timed out; reconcile before retrying a mutation") from exc
     except OSError as exc:
         raise AdapterError("npm command could not be started") from exc
-    if len(completed.stdout.encode("utf-8")) > MAX_OUTPUT_BYTES:
+    if len(stdout_bytes) > MAX_OUTPUT_BYTES or len(stderr_bytes) > MAX_OUTPUT_BYTES:
         raise AdapterError("npm output exceeded the safety limit")
+    try:
+        stdout = stdout_bytes.decode("utf-8")
+        stderr_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise AdapterError("npm returned non-UTF-8 output") from exc
     if completed.returncode != 0:
         raise AdapterError(f"npm command failed with exit code {completed.returncode}")
     if not expect_json:
-        return completed.stdout.strip()
+        return stdout.strip()
     try:
-        return json.loads(completed.stdout)
-    except json.JSONDecodeError as exc:
+        return parse_json_text(stdout, source="npm output")
+    except ValidationError as exc:
         raise AdapterError("npm returned non-JSON output") from exc
 
 
@@ -125,11 +141,19 @@ def _safe_token_metadata(raw: Any) -> list[dict[str, Any]]:
     }
     if len(candidates) > MAX_ITEMS:
         raise AdapterError("npm credential metadata exceeded the safety limit")
-    return [
-        {key: item.get(key) for key in sorted(allowed) if key in item}
-        for item in candidates
-        if isinstance(item, dict)
-    ]
+    if not all(isinstance(item, dict) for item in candidates):
+        raise AdapterError("npm credential metadata contains a malformed item")
+    if not all(isinstance(item.get("readonly"), bool) for item in candidates):
+        raise AdapterError("npm credential metadata is missing a readonly boolean")
+    return [{key: item.get(key) for key in sorted(allowed) if key in item} for item in candidates]
+
+
+def require_supported_npm_version() -> None:
+    version = _run_npm(["--version"], expect_json=False)
+    if version != SUPPORTED_NPM_VERSION:
+        raise AdapterError(
+            f"npm CLI {SUPPORTED_NPM_VERSION} is required; found {version or 'unknown'}"
+        )
 
 
 def collect_npm_inventory(
@@ -139,6 +163,7 @@ def collect_npm_inventory(
     userconfig: str | Path | None = None,
 ) -> dict[str, Any]:
     """Ask the authenticated npm CLI for non-secret publication metadata."""
+    require_supported_npm_version()
     registry = _registry_url(registry)
     if len(packages) > MAX_PACKAGES:
         raise AdapterError(f"npm inventory accepts at most {MAX_PACKAGES} packages")
@@ -168,14 +193,23 @@ def collect_npm_inventory(
             raise AdapterError(f"npm dist-tag response is invalid for {package}")
         if len(owners) > MAX_ITEMS or len(tags) > MAX_ITEMS:
             raise AdapterError(f"npm metadata exceeded the safety limit for {package}")
+        if not all(
+            isinstance(name, str) and name and isinstance(email, str) and email
+            for name, email in owners.items()
+        ):
+            raise AdapterError(f"npm owner metadata is invalid for {package}")
+        if not all(
+            isinstance(name, str) and name and isinstance(version, str) and version
+            for name, version in tags.items()
+        ):
+            raise AdapterError(f"npm dist-tag metadata is invalid for {package}")
         package_results.append(
             {
                 "name": package,
                 "owners": [
-                    {"name": str(name), "email": str(email)}
-                    for name, email in sorted(owners.items())
+                    {"name": name, "email": email} for name, email in sorted(owners.items())
                 ],
-                "dist_tags": {str(name): str(version) for name, version in sorted(tags.items())},
+                "dist_tags": {name: version for name, version in sorted(tags.items())},
             }
         )
 
