@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/patcGM/closurectl/v0.1.0/schemas/closure-receipt.schema.json",
+  "title": "closurectl signed closure receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "tool",
+    "issued_at",
+    "plan_digest",
+    "graph_digest",
+    "closure_state",
+    "observations",
+    "missing_actions",
+    "scope_statement",
+    "receipt_digest",
+    "signature"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "const": "closurectl"
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "issued_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "plan_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "graph_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "closure_state": {
+      "enum": [
+        "CLOSED",
+        "PARTIAL",
+        "OPEN",
+        "INDETERMINATE",
+        "BLOCKED"
+      ]
+    },
+    "observations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "action_id",
+          "status",
+          "checked_at",
+          "summary",
+          "reference"
+        ],
+        "properties": {
+          "action_id": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "VERIFIED_CLOSED",
+              "STILL_OPEN",
+              "INDETERMINATE"
+            ]
+          },
+          "checked_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "reference": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "missing_actions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "scope_statement": {
+      "type": "string",
+      "minLength": 1
+    },
+    "receipt_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "algorithm",
+        "value"
+      ],
+      "properties": {
+        "algorithm": {
+          "const": "Ed25519"
+        },
+        "value": {
+          "type": "string",
+          "contentEncoding": "base64"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,74 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "closurectl"
+dynamic = ["version"]
+description = "Plan and verify revocation closure after a developer identity compromise."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [
+  { name = "closurectl contributors" }
+]
+keywords = [
+  "incident-response",
+  "identity-security",
+  "revocation",
+  "github",
+  "npm",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Information Technology",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Security",
+]
+dependencies = [
+  "cryptography>=43",
+]
+
+[project.optional-dependencies]
+dev = [
+  "build>=1.2",
+  "jsonschema>=4.23",
+  "pyinstaller>=6",
+  "ruff>=0.8",
+]
+
+[project.urls]
+Homepage = "https://github.com/patcGM/closurectl"
+Issues = "https://github.com/patcGM/closurectl/issues"
+Documentation = "https://github.com/patcGM/closurectl#readme"
+
+[project.scripts]
+closurectl = "closurectl.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+closurectl = ["py.typed"]
+
+[tool.setuptools.data-files]
+"share/closurectl/schemas" = ["schemas/*.json"]
+
+[tool.setuptools.dynamic]
+version = { attr = "closurectl.__version__" }
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]

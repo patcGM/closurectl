@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/patcGM/closurectl/v0.1.0/schemas/evidence.schema.json",
+  "title": "closurectl observation evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "plan_digest",
+    "observations"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "plan_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "observations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "action_id",
+          "status",
+          "checked_at",
+          "summary"
+        ],
+        "properties": {
+          "action_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "enum": [
+              "VERIFIED_CLOSED",
+              "STILL_OPEN",
+              "INDETERMINATE"
+            ]
+          },
+          "checked_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reference": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

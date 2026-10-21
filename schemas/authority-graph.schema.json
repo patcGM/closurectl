@@ -1,0 +1,182 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/patcGM/closurectl/v0.1.0/schemas/authority-graph.schema.json",
+  "title": "closurectl authority graph",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "title",
+    "nodes",
+    "edges",
+    "roots",
+    "sinks"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/node"
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/edge"
+      }
+    },
+    "roots": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "sinks": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "$defs": {
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "label"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "enforcement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "operation",
+        "target",
+        "phase"
+      ],
+      "properties": {
+        "provider": {
+          "type": "string",
+          "minLength": 1
+        },
+        "operation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1
+        },
+        "phase": {
+          "enum": [
+            "stop_minting",
+            "cancel_pending",
+            "revoke_descendants",
+            "revoke_roots",
+            "verify_sinks"
+          ]
+        }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "source",
+        "target",
+        "kind",
+        "label",
+        "revocable",
+        "cost"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "revocable": {
+          "type": "boolean"
+        },
+        "cost": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "enforcement": {
+          "$ref": "#/$defs/enforcement"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "revocable": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "enforcement"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "enforcement"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

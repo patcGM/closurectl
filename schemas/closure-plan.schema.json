@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/patcGM/closurectl/v0.1.0/schemas/closure-plan.schema.json",
+  "title": "closurectl closure plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "title",
+    "graph_digest",
+    "status",
+    "total_cost",
+    "actions",
+    "blocked_path",
+    "plan_digest"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "graph_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "status": {
+      "enum": [
+        "PLANNED",
+        "BLOCKED"
+      ]
+    },
+    "total_cost": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/action"
+      }
+    },
+    "blocked_path": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "plan_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  },
+  "$defs": {
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action_id",
+        "edge_id",
+        "provider",
+        "operation",
+        "target",
+        "phase",
+        "cost",
+        "reason"
+      ],
+      "properties": {
+        "action_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "edge_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provider": {
+          "type": "string",
+          "minLength": 1
+        },
+        "operation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1
+        },
+        "phase": {
+          "enum": [
+            "stop_minting",
+            "cancel_pending",
+            "revoke_descendants",
+            "revoke_roots",
+            "verify_sinks"
+          ]
+        },
+        "cost": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

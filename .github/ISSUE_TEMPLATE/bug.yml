@@ -1,0 +1,46 @@
+name: Bug report
+description: Report incorrect or unsafe behavior without including secrets.
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include credentials or private incident data. Security
+        vulnerabilities must follow SECURITY.md instead of this form.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      placeholder: "closurectl 0.1.0"
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Observed behavior
+      description: Include sanitized output and exit status.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal sanitized reproduction
+      description: Use synthetic provider and credential handles only.
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed credentials and private incident data.
+          required: true
+        - label: This is not a private security vulnerability.
+          required: true

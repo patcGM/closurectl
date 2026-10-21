@@ -1,0 +1,155 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Validate release source
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Verify tag, version, and main ancestry
+        run: |
+          VERSION="$(PYTHONPATH=src python -c 'from closurectl import __version__; print(__version__)')"
+          test "v${VERSION}" = "${GITHUB_REF_NAME}"
+          git fetch origin main
+          git merge-base --is-ancestor "${GITHUB_SHA}" origin/main
+
+      - name: Install release tools
+        run: python -m pip install ".[dev]" twine
+
+      - name: Run quality gate
+        run: |
+          ruff check .
+          ruff format --check .
+          python -m unittest discover -s tests -v
+          closurectl demo --dir release-gate-demo
+
+      - name: Build Python distributions
+        run: |
+          python -m build
+          python -m twine check dist/*
+
+      - name: Upload Python distributions
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: python-distributions
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+          if-no-files-found: error
+
+  binary:
+    name: Build ${{ matrix.name }}
+    needs: gate
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: closurectl-linux-x86_64
+            output: ./dist/closurectl-linux-x86_64
+          - os: windows-latest
+            name: closurectl-windows-x86_64
+            output: ./dist/closurectl-windows-x86_64.exe
+          - os: macos-latest
+            name: closurectl-macos
+            output: ./dist/closurectl-macos
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install build dependencies
+        run: python -m pip install . pyinstaller
+
+      - name: Build single-file executable
+        run: >-
+          python -m PyInstaller
+          --clean
+          --onefile
+          --name ${{ matrix.name }}
+          --specpath build
+          --workpath build/pyinstaller
+          --distpath dist
+          packaging/entrypoint.py
+
+      - name: Smoke-test executable
+        shell: pwsh
+        run: |
+          & '${{ matrix.output }}' --version
+          & '${{ matrix.output }}' demo --dir frozen-demo
+          & '${{ matrix.output }}' verify frozen-demo/closure-receipt.json `
+            --public-key frozen-demo/demo-public.pem `
+            --graph frozen-demo/authority-graph.json `
+            --plan frozen-demo/closure-plan.json
+
+      - name: Upload binary
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.output }}
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub release
+    needs: [gate, binary]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download binaries
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: closurectl-*
+          path: release
+          merge-multiple: true
+
+      - name: Download Python distributions
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: python-distributions
+          path: release
+
+      - name: Create checksums
+        run: |
+          cd release
+          sha256sum * > SHA256SUMS.txt
+
+      - name: Publish release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          generate_release_notes: true
+          prerelease: true
+          files: release/*
