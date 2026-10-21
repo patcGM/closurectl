@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from . import __version__
+from .adapters.aws import collect_aws_inventory
 from .adapters.github import collect_github_inventory
 from .adapters.npm import collect_npm_inventory
 from .demo import closed_evidence, compromised_maintainer_graph
@@ -18,9 +19,16 @@ from .execution import (
     apply_execution,
     create_execution_preview,
     observe_execution,
+    read_execution_journal,
 )
+from .executors.aws import AwsExecutor
 from .executors.github import GitHubExecutor
 from .executors.npm import NpmExecutor
+from .incident import (
+    build_authority_graph,
+    create_incident_draft,
+    validate_incident_draft,
+)
 from .models import AuthorityGraph, ClosurePlan
 from .planner import plan_closure
 from .receipts import (
@@ -29,6 +37,7 @@ from .receipts import (
     utc_now,
     verify_receipt,
 )
+from .reporting import render_html_report, write_html_report
 from .serialization import read_json, write_json
 
 
@@ -102,9 +111,75 @@ def _parser() -> argparse.ArgumentParser:
     )
     npm.add_argument("-o", "--out", required=True, help="inventory output path")
 
+    aws = providers.add_parser("aws", help="inventory exact AWS IAM roles")
+    aws.add_argument(
+        "--role",
+        action="append",
+        required=True,
+        help="IAM role name; repeat for multiple roles",
+    )
+    aws.add_argument(
+        "--profile",
+        default=os.environ.get("AWS_PROFILE", ""),
+        help="read-only AWS CLI profile (defaults to AWS_PROFILE)",
+    )
+    aws.add_argument("-o", "--out", required=True, help="inventory output path")
+
+    incident = commands.add_parser(
+        "incident",
+        help="turn provider inventories into a human-confirmed authority graph",
+    )
+    incident_modes = incident.add_subparsers(dest="incident_mode", required=True)
+
+    incident_draft = incident_modes.add_parser(
+        "draft",
+        help="propose review candidates from secret-free provider inventories",
+    )
+    incident_draft.add_argument("--title", required=True, help="incident title")
+    incident_draft.add_argument(
+        "--github-inventory",
+        action="append",
+        default=[],
+        help="GitHub inventory JSON; repeat to combine snapshots",
+    )
+    incident_draft.add_argument(
+        "--npm-inventory",
+        action="append",
+        default=[],
+        help="npm inventory JSON; repeat to combine snapshots",
+    )
+    incident_draft.add_argument(
+        "--aws-inventory",
+        action="append",
+        default=[],
+        help="AWS IAM inventory JSON; repeat to combine snapshots",
+    )
+    incident_draft.add_argument("-o", "--out", required=True, help="draft output path")
+
+    incident_build = incident_modes.add_parser(
+        "build",
+        help="build a graph from explicitly selected draft candidates",
+    )
+    incident_build.add_argument("draft", help="incident draft JSON")
+    incident_build.add_argument(
+        "--select",
+        action="append",
+        default=[],
+        help="candidate ID to include; repeat for multiple paths",
+    )
+    incident_build.add_argument("--confirm", required=True, help="exact incident draft digest")
+    incident_build.add_argument("-o", "--out", required=True, help="authority graph output path")
+
+    incident_wizard = incident_modes.add_parser(
+        "wizard",
+        help="interactively review every candidate and build an authority graph",
+    )
+    incident_wizard.add_argument("draft", help="incident draft JSON")
+    incident_wizard.add_argument("-o", "--out", required=True, help="authority graph output path")
+
     execute = commands.add_parser(
         "execute",
-        help="preview or perform an allow-listed experimental provider mutation",
+        help="preview or perform an exact, allow-listed provider mutation",
     )
     execution_modes = execute.add_subparsers(dest="execution_mode", required=True)
 
@@ -115,7 +190,7 @@ def _parser() -> argparse.ArgumentParser:
     preview.add_argument(
         "--experimental",
         action="store_true",
-        help="acknowledge the experimental live-mutation contract",
+        help=argparse.SUPPRESS,
     )
 
     for mode in ("apply", "resume"):
@@ -135,7 +210,7 @@ def _parser() -> argparse.ArgumentParser:
         command.add_argument(
             "--experimental",
             action="store_true",
-            help="acknowledge the experimental live-mutation contract",
+            help=argparse.SUPPRESS,
         )
 
     observe = commands.add_parser(
@@ -147,6 +222,17 @@ def _parser() -> argparse.ArgumentParser:
     observe.add_argument("preview", help="path to the execution preview JSON")
     observe.add_argument("--journal", required=True, help="execution journal path")
     observe.add_argument("-o", "--out", required=True, help="evidence output path")
+
+    report = commands.add_parser(
+        "report",
+        help="render a verified, self-contained HTML closure report",
+    )
+    report.add_argument("graph", help="path to the authority graph JSON")
+    report.add_argument("plan", help="path to the closure plan JSON")
+    report.add_argument("receipt", help="path to the signed closure receipt JSON")
+    report.add_argument("--public-key", required=True, help="Ed25519 public verification key")
+    report.add_argument("--journal", help="optional append-only execution journal")
+    report.add_argument("-o", "--out", required=True, help="HTML report output path")
 
     demo = commands.add_parser("demo", help="generate and verify a self-contained demo incident")
     demo.add_argument("--dir", default="closurectl-demo", help="directory for demo artifacts")
@@ -202,11 +288,47 @@ def _provider_executors(plan: ClosurePlan) -> dict[str, Any]:
             recovery_config,
             registry=os.environ.get("CLOSURECTL_NPM_REGISTRY", "https://registry.npmjs.org"),
         )
+    if "aws" in providers:
+        mutation_profile = os.environ.get("CLOSURECTL_AWS_MUTATION_PROFILE", "")
+        observer_profile = os.environ.get("CLOSURECTL_AWS_OBSERVER_PROFILE", "")
+        if not mutation_profile or not observer_profile:
+            raise ValidationError(
+                "set CLOSURECTL_AWS_MUTATION_PROFILE and CLOSURECTL_AWS_OBSERVER_PROFILE"
+            )
+        executors["aws"] = AwsExecutor(mutation_profile, observer_profile)
     return executors
 
 
 def _emit_json(value: dict[str, Any]) -> None:
     print(json.dumps(value, ensure_ascii=False, sort_keys=True))
+
+
+def _prompt_candidate_selection(draft: dict[str, Any]) -> tuple[list[str], str]:
+    selected: list[str] = []
+    print(f"incident: {draft['title']}")
+    print(f"draft:    {draft['draft_digest']}")
+    print("Inventory paths are proposals, not proof. Review every assumption.")
+    for candidate in draft["candidates"]:
+        print()
+        print(f"[{candidate['candidate_id']}] {candidate['summary']}")
+        print(f"  assumption: {candidate['assumption']}")
+        if candidate["mandatory"]:
+            print("  mandatory: incomplete inventory forces this blocking path")
+            selected.append(candidate["candidate_id"])
+            continue
+        try:
+            answer = input("  include this path? [y/N] ").strip().lower()
+        except EOFError as exc:
+            raise ValidationError("incident wizard input ended before review completed") from exc
+        if answer in {"y", "yes"}:
+            selected.append(candidate["candidate_id"])
+        elif answer not in {"", "n", "no"}:
+            raise ValidationError("incident wizard answers must be yes or no")
+    try:
+        confirmation = input("Type the exact draft digest to build the graph: ").strip()
+    except EOFError as exc:
+        raise ValidationError("incident wizard input ended before digest confirmation") from exc
+    return selected, confirmation
 
 
 def _print_plan(plan: ClosurePlan) -> None:
@@ -352,11 +474,15 @@ def _execute(arguments: argparse.Namespace) -> int:
                 arguments.repo,
                 api_url=arguments.api_url,
             )
-        else:
+        elif arguments.provider == "npm":
             snapshot = collect_npm_inventory(
                 arguments.package,
                 registry=arguments.registry,
             )
+        else:
+            if not arguments.profile:
+                raise ValidationError("set AWS_PROFILE or pass --profile")
+            snapshot = collect_aws_inventory(arguments.role, profile=arguments.profile)
         write_json(arguments.out, snapshot)
         destination = str(Path(arguments.out).resolve())
         if arguments.json:
@@ -372,11 +498,67 @@ def _execute(arguments: argparse.Namespace) -> int:
             print("Only allow-listed metadata was written; review it before sharing.")
         return 0
 
-    if arguments.command == "execute":
-        if not arguments.experimental:
-            raise ValidationError(
-                "live mutations require --experimental and an exact confirmed preview"
+    if arguments.command == "incident":
+        if arguments.incident_mode == "draft":
+            inventory_paths = [
+                *arguments.github_inventory,
+                *arguments.npm_inventory,
+                *arguments.aws_inventory,
+            ]
+            if not inventory_paths:
+                raise ValidationError("provide at least one GitHub or npm inventory")
+            draft = create_incident_draft(
+                arguments.title,
+                [read_json(path) for path in inventory_paths],
             )
+            write_json(arguments.out, draft)
+            result = {
+                "draft_digest": draft["draft_digest"],
+                "candidates": len(draft["candidates"]),
+                "mandatory_candidates": sum(
+                    1 for candidate in draft["candidates"] if candidate["mandatory"]
+                ),
+                "written": str(Path(arguments.out).resolve()),
+            }
+            if arguments.json:
+                _emit_json(result)
+            else:
+                print(f"draft: {result['draft_digest']}")
+                print(f"candidates: {result['candidates']}")
+                print(f"mandatory blocking paths: {result['mandatory_candidates']}")
+                for candidate in draft["candidates"]:
+                    marker = "mandatory" if candidate["mandatory"] else "selectable"
+                    print(f"  [{marker}] {candidate['candidate_id']}: {candidate['summary']}")
+                print(f"written: {result['written']}")
+            return 0
+
+        draft = validate_incident_draft(read_json(arguments.draft))
+        if arguments.incident_mode == "wizard":
+            if arguments.json:
+                raise ValidationError("--json cannot be combined with the interactive wizard")
+            selected, confirmation = _prompt_candidate_selection(draft)
+        else:
+            selected = arguments.select
+            confirmation = arguments.confirm
+        graph = build_authority_graph(draft, selected, confirmation)
+        write_json(arguments.out, graph.to_dict())
+        result = {
+            "graph_digest": graph.digest,
+            "nodes": len(graph.nodes),
+            "edges": len(graph.edges),
+            "roots": len(graph.roots),
+            "sinks": len(graph.sinks),
+            "written": str(Path(arguments.out).resolve()),
+        }
+        if arguments.json:
+            _emit_json(result)
+        else:
+            print(f"graph: {result['graph_digest']}")
+            print(f"selected paths: {result['edges']}")
+            print(f"written: {result['written']}")
+        return 0
+
+    if arguments.command == "execute":
         graph, plan = _load_graph_and_verified_plan(arguments.graph, arguments.plan)
         executors = _provider_executors(plan)
         if arguments.execution_mode == "preview":
@@ -438,6 +620,36 @@ def _execute(arguments: argparse.Namespace) -> int:
             print(f"verified closed: {result['closed']}/{result['total']}")
             print(f"written: {result['written']}")
         return 0 if result["closed"] == result["total"] else 5
+
+    if arguments.command == "report":
+        graph, plan = _load_graph_and_verified_plan(arguments.graph, arguments.plan)
+        receipt = read_json(arguments.receipt)
+        verification = verify_receipt(receipt, arguments.public_key, plan)
+        events = read_execution_journal(arguments.journal) if arguments.journal else []
+        write_html_report(
+            arguments.out,
+            render_html_report(
+                graph,
+                plan,
+                receipt,
+                verification,
+                journal_events=events,
+            ),
+        )
+        result = {
+            "closure_state": verification["closure_state"],
+            "receipt_digest": verification["receipt_digest"],
+            "journal_events": len(events),
+            "written": str(Path(arguments.out).resolve()),
+        }
+        if arguments.json:
+            _emit_json(result)
+        else:
+            print(f"closure state: {result['closure_state']}")
+            print("receipt signature: VALID")
+            print(f"timeline events: {result['journal_events']}")
+            print(f"written: {result['written']}")
+        return 0 if verification["closure_state"] == "CLOSED" else 4
 
     if arguments.command == "demo":
         _run_demo(arguments.dir)

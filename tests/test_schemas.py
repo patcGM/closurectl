@@ -9,6 +9,7 @@ from jsonschema import Draft202012Validator
 from jsonschema import ValidationError as JsonSchemaError
 
 from closurectl.demo import closed_evidence, compromised_maintainer_graph
+from closurectl.incident import create_incident_draft
 from closurectl.models import AuthorityGraph, ClosurePlan
 from closurectl.planner import plan_closure
 from closurectl.receipts import create_receipt, generate_keypair
@@ -112,6 +113,24 @@ class SchemaCompatibilityTests(unittest.TestCase):
         invalid["unhashed_annotation"] = "not allowed"
         with self.assertRaises(JsonSchemaError):
             Draft202012Validator(load_schema("evidence-v2.schema.json")).validate(invalid)
+
+    def test_incident_draft_matches_published_schema(self) -> None:
+        inventory = {
+            "schema_version": "1",
+            "adapter": "npm-read-only",
+            "collected_at": "2026-10-21T12:00:00Z",
+            "credential_handle": "npm-cli-current-user",
+            "registry": "https://registry.npmjs.org",
+            "credential_metadata": [{"id": "token-id-123", "name": "release"}],
+            "packages": [],
+            "limitations": ["bounded"],
+        }
+        draft = create_incident_draft(
+            "Schema incident",
+            [inventory],
+            now=lambda: "2026-10-21T12:01:00Z",
+        )
+        Draft202012Validator(load_schema("incident-draft.schema.json")).validate(draft)
 
 
 if __name__ == "__main__":

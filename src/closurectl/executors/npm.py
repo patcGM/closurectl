@@ -6,7 +6,7 @@ import hashlib
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from ..adapters.npm import DEFAULT_REGISTRY, _registry_url, _run_npm, _safe_token_metadata
 from ..errors import AdapterError, ExecutionError
@@ -74,7 +74,7 @@ class NpmExecutor:
         )
         self._registry = _registry_url(registry)
         if self._registry != DEFAULT_REGISTRY:
-            raise ExecutionError("alpha npm mutation supports only https://registry.npmjs.org")
+            raise ExecutionError("npm mutation supports only https://registry.npmjs.org")
         self._now = now
 
     @property
@@ -182,8 +182,15 @@ class NpmExecutor:
             ),
         }
 
-    def apply(self, action: PlanAction, target: ExecutionTarget) -> ApplyResult:
-        del action
+    def apply(
+        self,
+        action: PlanAction,
+        target: ExecutionTarget,
+        *,
+        preview_action: Mapping[str, Any] | None = None,
+        requested_at: str = "",
+    ) -> ApplyResult:
+        del action, preview_action, requested_at
         try:
             if not self._target_present(target):
                 return ApplyResult(
@@ -247,8 +254,15 @@ class NpmExecutor:
             target.resource_uri,
         )
 
-    def reconcile(self, action: PlanAction, target: ExecutionTarget) -> ApplyResult:
-        del action
+    def reconcile(
+        self,
+        action: PlanAction,
+        target: ExecutionTarget,
+        *,
+        preview_action: Mapping[str, Any] | None = None,
+        requested_at: str = "",
+    ) -> ApplyResult:
+        del action, preview_action, requested_at
         try:
             present = self._target_present(target)
         except AdapterError as exc:
@@ -275,8 +289,9 @@ class NpmExecutor:
         target: ExecutionTarget,
         *,
         requested_at: str | None,
+        preview_action: Mapping[str, Any] | None = None,
     ) -> ObservationResult:
-        del action
+        del action, preview_action
         try:
             observer = self._whoami(self._recovery_config)
             present = self._target_present(target)

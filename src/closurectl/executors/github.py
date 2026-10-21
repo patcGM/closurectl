@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 import urllib.parse
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from ..adapters.github import GitHubClient
 from ..errors import AdapterError, ExecutionError
@@ -147,7 +147,15 @@ class GitHubExecutor:
                 self._sleep(self._interval)
         return ApplyResult("INDETERMINATE", last_summary, path)
 
-    def apply(self, action: PlanAction, target: ExecutionTarget) -> ApplyResult:
+    def apply(
+        self,
+        action: PlanAction,
+        target: ExecutionTarget,
+        *,
+        preview_action: Mapping[str, Any] | None = None,
+        requested_at: str = "",
+    ) -> ApplyResult:
+        del preview_action, requested_at
         path = self._path(target)
         try:
             resource = self._safe_resource(target, self._mutation.get(path).body)
@@ -185,8 +193,15 @@ class GitHubExecutor:
             )
         return self._reconcile(target)
 
-    def reconcile(self, action: PlanAction, target: ExecutionTarget) -> ApplyResult:
-        del action
+    def reconcile(
+        self,
+        action: PlanAction,
+        target: ExecutionTarget,
+        *,
+        preview_action: Mapping[str, Any] | None = None,
+        requested_at: str = "",
+    ) -> ApplyResult:
+        del action, preview_action, requested_at
         return self._reconcile(target)
 
     def observe(
@@ -195,8 +210,9 @@ class GitHubExecutor:
         target: ExecutionTarget,
         *,
         requested_at: str | None,
+        preview_action: Mapping[str, Any] | None = None,
     ) -> ObservationResult:
-        del requested_at
+        del requested_at, preview_action
         path = self._path(target)
         try:
             resource = self._safe_resource(target, self._observer.get(path).body)

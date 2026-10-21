@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Mapping, Protocol
 
 from ..execution_models import ExecutionTarget
 from ..models import PlanAction
@@ -40,10 +40,24 @@ class ProviderExecutor(Protocol):
     def binding(self, action: PlanAction, target: ExecutionTarget) -> dict[str, str]:
         """Return provider and credential identities without inspecting target state."""
 
-    def apply(self, action: PlanAction, target: ExecutionTarget) -> ApplyResult:
+    def apply(
+        self,
+        action: PlanAction,
+        target: ExecutionTarget,
+        *,
+        preview_action: Mapping[str, Any] | None = None,
+        requested_at: str = "",
+    ) -> ApplyResult:
         """Request one exact mutation and reconcile its result."""
 
-    def reconcile(self, action: PlanAction, target: ExecutionTarget) -> ApplyResult:
+    def reconcile(
+        self,
+        action: PlanAction,
+        target: ExecutionTarget,
+        *,
+        preview_action: Mapping[str, Any] | None = None,
+        requested_at: str = "",
+    ) -> ApplyResult:
         """Read provider state without repeating a mutation."""
 
     def observe(
@@ -52,5 +66,6 @@ class ProviderExecutor(Protocol):
         target: ExecutionTarget,
         *,
         requested_at: str | None,
+        preview_action: Mapping[str, Any] | None = None,
     ) -> ObservationResult:
         """Observe closure using credentials independent of the mutation identity."""

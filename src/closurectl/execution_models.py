@@ -18,11 +18,14 @@ PREVIEW_TTL_SECONDS = 900
 _REPOSITORY_PART = re.compile(r"^[A-Za-z0-9_.-]+$")
 _NUMERIC_ID = re.compile(r"^[1-9][0-9]*$")
 _NPM_TOKEN_ID = re.compile(r"^[A-Za-z0-9._-]{4,200}$")
+_AWS_ACCOUNT_ID = re.compile(r"^[0-9]{12}$")
+_AWS_ROLE_NAME = re.compile(r"^[A-Za-z0-9_+=,.@-]{1,64}$")
 
 OPERATION_PHASES = {
     ("github", "disable_workflow"): "stop_minting",
     ("github", "cancel_run"): "cancel_pending",
     ("npm", "revoke_token"): "revoke_roots",
+    ("aws", "revoke_role_sessions"): "revoke_descendants",
 }
 
 
@@ -116,6 +119,29 @@ def parse_execution_target(action: PlanAction) -> ExecutionTarget:
             repository=repository,
             resource_kind=kind[:-1],
             resource_id=parts[3],
+        )
+
+    if action.provider == "aws":
+        if (
+            parsed.scheme != "aws"
+            or parsed.hostname is None
+            or not _AWS_ACCOUNT_ID.fullmatch(parsed.hostname)
+        ):
+            raise ValidationError("AWS targets must use aws://ACCOUNT_ID/iam/roles/ROLE_NAME")
+        parts = [urllib.parse.unquote(part) for part in parsed.path.split("/") if part]
+        if (
+            len(parts) != 3
+            or parts[:2] != ["iam", "roles"]
+            or not _AWS_ROLE_NAME.fullmatch(parts[2])
+        ):
+            raise ValidationError("AWS targets must use aws://ACCOUNT_ID/iam/roles/ROLE_NAME")
+        return ExecutionTarget(
+            provider="aws",
+            operation=action.operation,
+            resource_uri=action.target,
+            account=parsed.hostname,
+            resource_kind="role",
+            resource_id=parts[2],
         )
 
     if (

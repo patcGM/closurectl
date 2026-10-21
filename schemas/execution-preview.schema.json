@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/patcGM/closurectl/v0.2.0a1/schemas/execution-preview.schema.json",
+  "$id": "https://github.com/patcGM/closurectl/schemas/execution-preview.schema.json",
   "title": "closurectl immutable execution preview",
   "type": "object",
   "additionalProperties": false,
@@ -60,6 +60,7 @@
       "properties": {
         "provider": {
           "enum": [
+            "aws",
             "github",
             "npm"
           ]
@@ -68,7 +69,8 @@
           "enum": [
             "disable_workflow",
             "cancel_run",
-            "revoke_token"
+            "revoke_token",
+            "revoke_role_sessions"
           ]
         },
         "resource_uri": {
@@ -126,6 +128,7 @@
         },
         "provider": {
           "enum": [
+            "aws",
             "github",
             "npm"
           ]
@@ -134,7 +137,8 @@
           "enum": [
             "disable_workflow",
             "cancel_run",
-            "revoke_token"
+            "revoke_token",
+            "revoke_role_sessions"
           ]
         },
         "phase": {

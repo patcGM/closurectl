@@ -107,16 +107,19 @@ class FakeExecutor:
             "observer_identity": self.binding_observer_identity,
         }
 
-    def apply(self, action, target):
+    def apply(self, action, target, *, preview_action, requested_at):
+        del preview_action, requested_at
         self.applied.append(action.action_id)
         state = self.results.pop(0)
         return ApplyResult(state, f"result is {state}", target.resource_uri)
 
-    def reconcile(self, action, target):
+    def reconcile(self, action, target, *, preview_action, requested_at):
+        del preview_action, requested_at
         self.reconciled.append(action.action_id)
         return ApplyResult(self.reconcile_state, "reconciled", target.resource_uri)
 
-    def observe(self, action, target, *, requested_at):
+    def observe(self, action, target, *, requested_at, preview_action):
+        del requested_at, preview_action
         return ObservationResult(
             "VERIFIED_CLOSED",
             "independent test observation",

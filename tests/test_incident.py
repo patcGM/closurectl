@@ -1,0 +1,307 @@
+from __future__ import annotations
+
+import copy
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from closurectl.cli import main
+from closurectl.errors import ValidationError
+from closurectl.incident import (
+    build_authority_graph,
+    create_incident_draft,
+    validate_incident_draft,
+)
+from closurectl.planner import plan_closure
+from closurectl.serialization import read_json, write_json
+
+
+def github_inventory(*, truncated: bool = False) -> dict:
+    return {
+        "schema_version": "1",
+        "adapter": "github-read-only",
+        "collected_at": "2026-10-21T12:00:00Z",
+        "credential_handle": "environment:GITHUB_TOKEN",
+        "subject": {"login": "maintainer", "id": 7, "type": "User"},
+        "oauth_scopes": ["repo", "workflow"],
+        "repositories": [
+            {
+                "full_name": "example/project",
+                "private": False,
+                "archived": False,
+                "default_branch": "main",
+                "permissions": {"admin": True},
+                "workflows": [
+                    {
+                        "id": 42,
+                        "name": "Release",
+                        "path": ".github/workflows/release.yml",
+                        "state": "active",
+                    },
+                    {
+                        "id": 43,
+                        "name": "Disabled",
+                        "path": ".github/workflows/disabled.yml",
+                        "state": "disabled_manually",
+                    },
+                ],
+                "workflow_count": 2,
+                "workflow_results_truncated": truncated,
+                "active_runs": [
+                    {
+                        "id": 99,
+                        "workflow_id": 42,
+                        "name": "Release",
+                        "event": "push",
+                        "status": "in_progress",
+                        "run_attempt": 1,
+                        "head_sha": "a" * 40,
+                        "created_at": "2026-10-21T12:00:00Z",
+                        "html_url": "https://github.com/example/project/actions/runs/99",
+                    }
+                ],
+                "run_count_scanned": 1,
+                "run_results_truncated": False,
+                "deploy_keys": [
+                    {
+                        "id": 5,
+                        "title": "production",
+                        "read_only": False,
+                        "verified": True,
+                        "created_at": "2026-10-01T12:00:00Z",
+                    }
+                ],
+                "deploy_key_count": 1,
+                "deploy_key_results_truncated": False,
+            }
+        ],
+        "limitations": ["bounded"],
+    }
+
+
+def npm_inventory() -> dict:
+    return {
+        "schema_version": "1",
+        "adapter": "npm-read-only",
+        "collected_at": "2026-10-21T12:01:00Z",
+        "credential_handle": "npm-cli-current-user",
+        "registry": "https://registry.npmjs.org",
+        "credential_metadata": [
+            {
+                "id": "token-id-123",
+                "name": "release",
+                "readonly": False,
+            }
+        ],
+        "packages": [
+            {
+                "name": "example-package",
+                "owners": [{"name": "maintainer", "email": "maintainer@example.test"}],
+                "dist_tags": {"latest": "1.0.0"},
+            }
+        ],
+        "limitations": ["bounded"],
+    }
+
+
+def aws_inventory() -> dict:
+    return {
+        "schema_version": "1",
+        "adapter": "aws-iam-read-only",
+        "collected_at": "2026-10-21T12:01:30Z",
+        "credential_handle": "aws-profile:observer",
+        "subject": {
+            "account": "123456789012",
+            "arn": "arn:aws:iam::123456789012:user/observer",
+            "user_id": "observer",
+        },
+        "partition": "aws",
+        "roles": [
+            {
+                "name": "ProductionDeployer",
+                "arn": "arn:aws:iam::123456789012:role/ProductionDeployer",
+                "path": "/",
+                "service_linked": False,
+                "max_session_duration": 3600,
+                "created_at": "2026-10-01T00:00:00Z",
+                "last_used_at": "2026-10-21T11:00:00Z",
+                "inline_policy_names": [],
+                "attached_policies": [],
+                "github_oidc_trust": [
+                    {
+                        "providers": [
+                            (
+                                "arn:aws:iam::123456789012:oidc-provider/"
+                                "token.actions.githubusercontent.com"
+                            )
+                        ],
+                        "conditions": {
+                            "StringLike:token.actions.githubusercontent.com:sub": [
+                                "repo:example/project:*"
+                            ]
+                        },
+                    }
+                ],
+            }
+        ],
+        "limitations": ["explicit roles only"],
+    }
+
+
+class IncidentDraftTests(unittest.TestCase):
+    def test_selected_inventory_paths_build_an_executable_plan(self) -> None:
+        draft = create_incident_draft(
+            "Compromised release",
+            [github_inventory(), npm_inventory(), aws_inventory()],
+            now=lambda: "2026-10-21T12:02:00Z",
+        )
+        candidate_ids = {item["candidate_id"] for item in draft["candidates"]}
+        self.assertIn("github:example/project:disable-workflow:42", candidate_ids)
+        self.assertIn("github:example/project:cancel-run:99", candidate_ids)
+        self.assertIn("github:example/project:deploy-key:5", candidate_ids)
+        self.assertIn("npm:registry.npmjs.org:revoke-token:token-id-123", candidate_ids)
+        self.assertIn(
+            "aws:123456789012:revoke-role-sessions:ProductionDeployer",
+            candidate_ids,
+        )
+        self.assertIn(
+            "aws:123456789012:github-oidc-trust:ProductionDeployer:1",
+            candidate_ids,
+        )
+        self.assertNotIn("github:example/project:disable-workflow:43", candidate_ids)
+
+        selected = [
+            "github:example/project:disable-workflow:42",
+            "github:example/project:cancel-run:99",
+            "npm:registry.npmjs.org:revoke-token:token-id-123",
+            "aws:123456789012:revoke-role-sessions:ProductionDeployer",
+        ]
+        graph = build_authority_graph(draft, selected, draft["draft_digest"])
+        plan = plan_closure(graph)
+        self.assertEqual(plan.status, "PLANNED")
+        self.assertEqual(
+            {(action.provider, action.operation) for action in plan.actions},
+            {
+                ("github", "disable_workflow"),
+                ("github", "cancel_run"),
+                ("npm", "revoke_token"),
+                ("aws", "revoke_role_sessions"),
+            },
+        )
+
+    def test_build_requires_exact_digest_and_known_selection(self) -> None:
+        draft = create_incident_draft(
+            "Incident",
+            [github_inventory()],
+            now=lambda: "2026-10-21T12:02:00Z",
+        )
+        selected = ["github:example/project:disable-workflow:42"]
+        with self.assertRaisesRegex(ValidationError, "exact draft digest"):
+            build_authority_graph(draft, selected, "0" * 64)
+        with self.assertRaisesRegex(ValidationError, "unknown incident candidates"):
+            build_authority_graph(draft, ["missing"], draft["draft_digest"])
+
+    def test_truncated_inventory_forces_a_blocked_graph(self) -> None:
+        draft = create_incident_draft(
+            "Incomplete incident",
+            [github_inventory(truncated=True)],
+            now=lambda: "2026-10-21T12:02:00Z",
+        )
+        mandatory = [item for item in draft["candidates"] if item["mandatory"]]
+        self.assertEqual(
+            [item["candidate_id"] for item in mandatory],
+            ["github:example/project:inventory-gap"],
+        )
+        graph = build_authority_graph(
+            draft,
+            ["github:example/project:disable-workflow:42"],
+            draft["draft_digest"],
+        )
+        self.assertEqual(plan_closure(graph).status, "BLOCKED")
+
+    def test_tampered_draft_is_rejected(self) -> None:
+        draft = create_incident_draft(
+            "Incident",
+            [npm_inventory()],
+            now=lambda: "2026-10-21T12:02:00Z",
+        )
+        tampered = copy.deepcopy(draft)
+        tampered["candidates"][0]["summary"] = "changed"
+        with self.assertRaisesRegex(ValidationError, "draft_digest"):
+            validate_incident_draft(tampered)
+
+    def test_cli_draft_and_build_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            inventory_path = root / "github.json"
+            draft_path = root / "draft.json"
+            graph_path = root / "graph.json"
+            write_json(inventory_path, github_inventory())
+            self.assertEqual(
+                main(
+                    [
+                        "incident",
+                        "draft",
+                        "--title",
+                        "CLI incident",
+                        "--github-inventory",
+                        str(inventory_path),
+                        "--out",
+                        str(draft_path),
+                    ]
+                ),
+                0,
+            )
+            draft = read_json(draft_path)
+            self.assertEqual(
+                main(
+                    [
+                        "incident",
+                        "build",
+                        str(draft_path),
+                        "--select",
+                        "github:example/project:disable-workflow:42",
+                        "--confirm",
+                        draft["draft_digest"],
+                        "--out",
+                        str(graph_path),
+                    ]
+                ),
+                0,
+            )
+            graph = read_json(graph_path)
+            self.assertEqual(graph["title"], "CLI incident")
+            self.assertEqual(len(graph["edges"]), 1)
+
+    def test_interactive_wizard_requires_selection_and_digest(self) -> None:
+        inventory = github_inventory()
+        inventory["repositories"][0]["permissions"] = {"pull": True}
+        inventory["repositories"][0]["active_runs"] = []
+        inventory["repositories"][0]["deploy_keys"] = []
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            draft = create_incident_draft(
+                "Wizard incident",
+                [inventory],
+                now=lambda: "2026-10-21T12:02:00Z",
+            )
+            draft_path = root / "draft.json"
+            graph_path = root / "graph.json"
+            write_json(draft_path, draft)
+            with patch("builtins.input", side_effect=["yes", draft["draft_digest"]]):
+                result = main(
+                    [
+                        "incident",
+                        "wizard",
+                        str(draft_path),
+                        "--out",
+                        str(graph_path),
+                    ]
+                )
+            self.assertEqual(result, 0)
+            self.assertEqual(len(read_json(graph_path)["edges"]), 1)
+
+
+if __name__ == "__main__":
+    unittest.main()
