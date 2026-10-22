@@ -334,6 +334,70 @@ def _configure_utf8_output() -> None:
                 continue
 
 
+def _path_identity(path: str | Path) -> str:
+    try:
+        return os.path.normcase(str(Path(path).resolve()))
+    except (OSError, RuntimeError) as exc:
+        raise ValidationError(f"cannot resolve artifact path: {path}") from exc
+
+
+def _paths_alias(left: str | Path, right: str | Path) -> bool:
+    if _path_identity(left) == _path_identity(right):
+        return True
+    try:
+        return os.path.samefile(left, right)
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        raise ValidationError(f"cannot safely compare artifact paths: {left}, {right}") from exc
+
+
+def _refuse_output_alias(
+    output: str | Path,
+    inputs: Sequence[str | Path | None],
+    *,
+    label: str,
+) -> None:
+    if any(source is not None and _paths_alias(output, source) for source in inputs):
+        raise ValidationError(f"{label} must not overwrite or alias an input artifact")
+
+
+def _refuse_existing_outputs(outputs: Sequence[Path], *, label: str) -> None:
+    if any(path.exists() or path.is_symlink() for path in outputs):
+        raise ValidationError(f"{label} refuses to overwrite existing artifacts")
+
+
+def _provider_config_paths() -> list[Path]:
+    configured = [
+        os.environ.get(name, "")
+        for name in (
+            "CLOSURECTL_NPM_MUTATION_USERCONFIG",
+            "CLOSURECTL_NPM_RECOVERY_USERCONFIG",
+            "NPM_CONFIG_USERCONFIG",
+            "AWS_CONFIG_FILE",
+            "AWS_SHARED_CREDENTIALS_FILE",
+        )
+    ]
+    homes = {
+        value
+        for value in (
+            os.environ.get("HOME", ""),
+            os.environ.get("USERPROFILE", ""),
+        )
+        if value
+    }
+    defaults = [
+        candidate
+        for home in homes
+        for candidate in (
+            Path(home) / ".npmrc",
+            Path(home) / ".aws" / "config",
+            Path(home) / ".aws" / "credentials",
+        )
+    ]
+    return [Path(value) for value in configured if value] + defaults
+
+
 def _prompt_candidate_selection(draft: dict[str, Any]) -> list[str]:
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         raise ValidationError("incident wizard requires an interactive TTY")
@@ -384,24 +448,33 @@ def _print_plan(plan: ClosurePlan) -> None:
 
 def _run_demo(directory: str) -> None:
     output = Path(directory)
-    output.mkdir(parents=True, exist_ok=True)
     graph_path = output / "authority-graph.json"
     plan_path = output / "closure-plan.json"
     evidence_path = output / "evidence.json"
     private_path = output / "demo-private.pem"
     public_path = output / "demo-public.pem"
     receipt_path = output / "closure-receipt.json"
+    artifact_paths = [
+        graph_path,
+        plan_path,
+        evidence_path,
+        private_path,
+        public_path,
+        receipt_path,
+    ]
+    _refuse_existing_outputs(artifact_paths, label="demo")
+    output.mkdir(parents=True, exist_ok=True)
 
     graph_dict = compromised_maintainer_graph()
-    write_json(graph_path, graph_dict)
+    write_json(graph_path, graph_dict, overwrite=False)
     graph = AuthorityGraph.from_dict(graph_dict)
     plan = plan_closure(graph)
-    write_json(plan_path, plan.to_dict())
+    write_json(plan_path, plan.to_dict(), overwrite=False)
     generate_keypair(private_path, public_path)
     evidence = closed_evidence(plan, utc_now())
-    write_json(evidence_path, evidence)
+    write_json(evidence_path, evidence, overwrite=False)
     receipt = create_receipt(plan, evidence, private_path)
-    write_json(receipt_path, receipt)
+    write_json(receipt_path, receipt, overwrite=False)
     verification = verify_receipt(receipt, public_path, plan)
 
     print("Demo models authority that survives a root credential revocation.")
@@ -437,6 +510,7 @@ def _execute(arguments: argparse.Namespace) -> int:
         return 0
 
     if arguments.command == "plan":
+        _refuse_output_alias(arguments.out, [arguments.graph], label="plan output")
         plan = plan_closure(_load_graph(arguments.graph))
         write_json(arguments.out, plan.to_dict())
         if arguments.json:
@@ -470,6 +544,16 @@ def _execute(arguments: argparse.Namespace) -> int:
         return 0
 
     if arguments.command == "receipt":
+        _refuse_output_alias(
+            arguments.out,
+            [
+                arguments.graph,
+                arguments.plan,
+                arguments.evidence,
+                arguments.private_key,
+            ],
+            label="receipt output",
+        )
         plan = _load_verified_plan(arguments.graph, arguments.plan)
         evidence = read_json(arguments.evidence)
         receipt = create_receipt(plan, evidence, arguments.private_key)
@@ -520,6 +604,11 @@ def _execute(arguments: argparse.Namespace) -> int:
         return 0 if result["status"] == "READY" else 5
 
     if arguments.command == "inventory":
+        _refuse_output_alias(
+            arguments.out,
+            _provider_config_paths(),
+            label="inventory output",
+        )
         if arguments.provider == "github":
             credential = os.environ.get("GITHUB_TOKEN", "")
             snapshot = collect_github_inventory(
@@ -561,6 +650,11 @@ def _execute(arguments: argparse.Namespace) -> int:
             ]
             if not inventory_paths:
                 raise ValidationError("provide at least one GitHub or npm inventory")
+            _refuse_output_alias(
+                arguments.out,
+                inventory_paths,
+                label="incident draft output",
+            )
             draft = create_incident_draft(
                 arguments.title,
                 [read_json(path) for path in inventory_paths],
@@ -586,6 +680,11 @@ def _execute(arguments: argparse.Namespace) -> int:
                 print(f"written: {result['written']}")
             return 0
 
+        _refuse_output_alias(
+            arguments.out,
+            [arguments.draft],
+            label="authority graph output",
+        )
         draft = validate_incident_draft(read_json(arguments.draft))
         if arguments.incident_mode == "wizard":
             if arguments.json:
@@ -631,6 +730,27 @@ def _execute(arguments: argparse.Namespace) -> int:
         return 0
 
     if arguments.command == "execute":
+        if arguments.execution_mode == "preview":
+            _refuse_output_alias(
+                arguments.out,
+                [
+                    arguments.graph,
+                    arguments.plan,
+                    *_provider_config_paths(),
+                ],
+                label="execution preview output",
+            )
+        else:
+            _refuse_output_alias(
+                arguments.journal,
+                [
+                    arguments.graph,
+                    arguments.plan,
+                    arguments.preview,
+                    *_provider_config_paths(),
+                ],
+                label="execution journal",
+            )
         graph, plan = _load_graph_and_verified_plan(arguments.graph, arguments.plan)
         executors = _provider_executors(plan)
         if arguments.execution_mode == "preview":
@@ -670,6 +790,17 @@ def _execute(arguments: argparse.Namespace) -> int:
         return 0 if summary["complete"] else 5
 
     if arguments.command == "observe":
+        _refuse_output_alias(
+            arguments.out,
+            [
+                arguments.graph,
+                arguments.plan,
+                arguments.preview,
+                arguments.journal,
+                *_provider_config_paths(),
+            ],
+            label="evidence output",
+        )
         graph, plan = _load_graph_and_verified_plan(arguments.graph, arguments.plan)
         executors = _provider_executors(plan)
         evidence = observe_execution(
@@ -696,7 +827,6 @@ def _execute(arguments: argparse.Namespace) -> int:
     if arguments.command == "report":
         if bool(arguments.journal) != bool(arguments.preview):
             raise ValidationError("report --journal and --preview must be supplied together")
-        output_identity = os.path.normcase(str(Path(arguments.out).resolve()))
         input_paths = [
             arguments.graph,
             arguments.plan,
@@ -708,8 +838,7 @@ def _execute(arguments: argparse.Namespace) -> int:
             input_paths.append(arguments.journal)
         if arguments.preview:
             input_paths.append(arguments.preview)
-        if output_identity in {os.path.normcase(str(Path(path).resolve())) for path in input_paths}:
-            raise ValidationError("report output must not overwrite or alias an input artifact")
+        _refuse_output_alias(arguments.out, input_paths, label="report output")
         graph, plan = _load_graph_and_verified_plan(arguments.graph, arguments.plan)
         receipt = read_json(arguments.receipt)
         evidence = read_json(arguments.evidence)

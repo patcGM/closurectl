@@ -56,6 +56,8 @@ compromised workstation
 - reports `CLOSED`, `PARTIAL`, `OPEN`, `INDETERMINATE`, or `BLOCKED`;
 - checks clean-machine mutation and recovery identities before an incident,
   without reading or changing a target;
+- refuses output paths that resolve to an input artifact or active provider
+  config, including hard-link and symlink aliases;
 - collects bounded, read-only GitHub, npm, and AWS metadata through explicit
   allow-lists;
 - turns GitHub, npm, and AWS inventories into a reviewable incident draft and

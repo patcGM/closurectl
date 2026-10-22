@@ -15,6 +15,9 @@ Versioning after the first public release.
   freshness enforcement, conflict rejection, and an overwrite-safe TTY wizard;
 - read-only clean-machine readiness checks for independent GitHub, npm, and AWS
   mutation and recovery identities before exact-target preview;
+- centralized output/input collision refusal, including hard-link and symlink
+  aliases, to protect source artifacts, provider configs, signing keys, and
+  execution journals;
 - evidence-bound HTML reporting with full journal validation, restrictive CSP,
   control-character neutralization, collision refusal, and output SHA-256.
 
