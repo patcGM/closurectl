@@ -12,6 +12,9 @@ from ..execution_models import ExecutionTarget
 from ..models import PlanAction
 from .base import ApplyResult, ObservationResult
 
+GITHUB_RECONCILE_ATTEMPTS = 15
+GITHUB_RECONCILE_INTERVAL_SECONDS = 2.0
+
 
 def _identity(client: GitHubClient) -> tuple[str, int]:
     body = client.get("/user").body
@@ -34,8 +37,8 @@ class GitHubExecutor:
         observer_credential: str,
         *,
         api_url: str = "https://api.github.com",
-        reconcile_attempts: int = 5,
-        reconcile_interval: float = 1.0,
+        reconcile_attempts: int = GITHUB_RECONCILE_ATTEMPTS,
+        reconcile_interval: float = GITHUB_RECONCILE_INTERVAL_SECONDS,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         if not observer_credential:

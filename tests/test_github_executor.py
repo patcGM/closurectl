@@ -5,7 +5,11 @@ import unittest
 from closurectl.adapters.github import GitHubResponse
 from closurectl.errors import AdapterError
 from closurectl.execution_models import parse_execution_target
-from closurectl.executors.github import GitHubExecutor
+from closurectl.executors.github import (
+    GITHUB_RECONCILE_ATTEMPTS,
+    GITHUB_RECONCILE_INTERVAL_SECONDS,
+    GitHubExecutor,
+)
 from closurectl.models import PlanAction
 
 
@@ -68,6 +72,12 @@ def executor(mutation: FakeGitHubClient, observer: FakeGitHubClient) -> GitHubEx
 
 
 class GitHubExecutorTests(unittest.TestCase):
+    def test_default_reconciliation_window_allows_async_cancellation(self) -> None:
+        self.assertGreaterEqual(
+            (GITHUB_RECONCILE_ATTEMPTS - 1) * GITHUB_RECONCILE_INTERVAL_SECONDS,
+            20,
+        )
+
     def test_preview_requires_distinct_break_glass_identity(self) -> None:
         workflow = {
             "id": 42,
