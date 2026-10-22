@@ -7,11 +7,10 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Callable
 
 from .errors import ClosureCtlError, ValidationError
-from .executors.aws import AwsExecutor
 from .executors.github import GitHubExecutor
 from .executors.npm import NpmExecutor
 
-READINESS_PROVIDERS = ("github", "npm", "aws")
+READINESS_PROVIDERS = ("github", "npm")
 
 
 def _required_environment(environment: Mapping[str, str], name: str) -> str:
@@ -39,18 +38,9 @@ def _npm_readiness(environment: Mapping[str, str]) -> dict[str, Any]:
     return executor.readiness()
 
 
-def _aws_readiness(environment: Mapping[str, str]) -> dict[str, Any]:
-    executor = AwsExecutor(
-        _required_environment(environment, "CLOSURECTL_AWS_MUTATION_PROFILE"),
-        _required_environment(environment, "CLOSURECTL_AWS_OBSERVER_PROFILE"),
-    )
-    return executor.readiness()
-
-
 _CHECKS: dict[str, Callable[[Mapping[str, str]], dict[str, Any]]] = {
     "github": _github_readiness,
     "npm": _npm_readiness,
-    "aws": _aws_readiness,
 }
 
 

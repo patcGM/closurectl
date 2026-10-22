@@ -12,7 +12,7 @@ containment после компрометации учётной записи р
 
 > [!IMPORTANT]
 > `closurectl` выполняет реальные высокорисковые mutations для точных GitHub
-> Actions, npm token и AWS IAM role targets. Обязательны короткоживущий preview,
+> Actions и npm token targets. Обязательны короткоживущий preview,
 > подтверждение точного digest, отдельная recovery identity, hash-chained
 > journal и независимая проверка. `CLOSED` относится только к объявленному
 > графу и не доказывает полное удаление атакующего.
@@ -21,7 +21,7 @@ containment после компрометации учётной записи р
 
 Ответ API `204 Revoked` означает, что один запрос принят. Он не доказывает, что:
 
-- ранее выпущенная AWS-сессия перестала работать;
+- ранее выпущенная cloud-сессия перестала работать;
 - поставленный в очередь deployment не выполнится;
 - удалены другие OAuth grants и deploy keys;
 - скомпрометированный workflow больше не выпустит новый доступ;
@@ -57,7 +57,7 @@ status: PLANNED
 actions: 5
   1. [stop_minting] github:disable_workflow -> release.yml
   2. [cancel_pending] github:cancel_workflow_run -> queued-production-deploy
-  3. [revoke_descendants] aws:invalidate_role_sessions -> production-deployer
+  3. [revoke_descendants] manual:invalidate_cloud_sessions -> production-deployer
   4. [revoke_roots] npm:revoke_publication_credential -> affected-maintainer
   5. [revoke_roots] github:revoke_session -> maintainer-session
 receipt: CLOSED
@@ -161,13 +161,12 @@ observer/recovery credentials, описанные ниже, и проверьт�
 ```powershell
 closurectl readiness `
   --provider github `
-  --provider npm `
-  --provider aws
+  --provider npm
 ```
 
 Команда выполняет только read-only запросы. Она проверяет, что GitHub использует
 две разные accounts, npm — разные credentials одной account, npm CLI 11.18.0 и
-доступный recovery token listing, а AWS — два разных principals одной account.
+доступный recovery token listing.
 Значения credentials не выводятся. Ошибка одного провайдера даёт `NOT_READY`,
 но остальные проверки продолжаются; exit code равен `5`. Для
 machine-readable результата укажите глобальный `--json` перед `readiness`.
@@ -205,21 +204,6 @@ closurectl inventory npm `
 
 Один запуск принимает не более 50 packages и 1 000 элементов в коллекции.
 
-## Инвентаризация AWS IAM
-
-Используется отдельный read-only профиль AWS CLI и точные имена ролей.
-Environment access keys не передаются дочернему процессу:
-
-```powershell
-closurectl inventory aws `
-  --profile incident-observer `
-  --role ProductionDeployer `
-  --out aws-inventory.json
-```
-
-Сохраняются только разрешённые поля роли и условия GitHub OIDC trust. Для
-service-linked и IAM Identity Center managed roles live execution запрещён.
-
 ## Incident wizard: inventory → graph
 
 Inventory не превращается в security claim автоматически. Сначала создаётся
@@ -230,7 +214,6 @@ closurectl incident draft `
   --title "Compromised release identity" `
   --github-inventory github-inventory.json `
   --npm-inventory npm-inventory.json `
-  --aws-inventory aws-inventory.json `
   --out incident-draft.json
 ```
 
@@ -247,7 +230,7 @@ closurectl incident wizard incident-draft.json --out authority-graph.json
 ## Контролируемый live containment
 
 Запускайте мутации только с чистой машины и заранее проверенной recovery
-identity. Исполнимы только четыре точных контракта:
+identity. Исполнимы только три точных контракта:
 
 - `github:disable_workflow` и target
   `github://OWNER/REPO/actions/workflows/NUMERIC_ID`;
@@ -255,8 +238,6 @@ identity. Исполнимы только четыре точных контра
   `github://OWNER/REPO/actions/runs/NUMERIC_ID`;
 - `npm:revoke_token` и target
   `npm://registry.npmjs.org/tokens/FULL_TOKEN_ID`.
-- `aws:revoke_role_sessions` и target
-  `aws://ACCOUNT_ID/iam/roles/ROLE_NAME`.
 
 Для GitHub нужны токены двух разных accounts:
 
@@ -272,21 +253,6 @@ $env:CLOSURECTL_GITHUB_OBSERVER_TOKEN = "independent-observer-token"
 $env:CLOSURECTL_NPM_MUTATION_USERCONFIG = "$HOME\.npmrc-mutation"
 $env:CLOSURECTL_NPM_RECOVERY_USERCONFIG = "$HOME\.npmrc-recovery"
 ```
-
-Для AWS нужны два разных CLI profiles двух разных principals в одном account:
-
-```powershell
-$env:CLOSURECTL_AWS_MUTATION_PROFILE = "incident-mutation"
-$env:CLOSURECTL_AWS_OBSERVER_PROFILE = "incident-observer"
-```
-
-AWS executor создаёт уникальную inline policy
-`ClosureCtlRevokeOlderSessions-*`. Её имя, cutoff, digest документа, target и
-неизменяемый IAM `RoleId` фиксируются подтверждённым preview; общая policy
-`AWSRevokeOlderSessions` никогда не перезаписывается. Действие отсекает все
-sessions роли, выпущенные до cutoff, а не одну session атакующего. До окончания
-пятиминутного IAM propagation window evidence остаётся `INDETERMINATE` и
-должно видеть именно эту policy.
 
 OTP нельзя передавать аргументом CLI. Если npm требует OTP, используйте
 защищённую переменную/config npm и удалите её сразу после операции.
@@ -345,8 +311,7 @@ readiness/execution/evidence, `130` — прерывание. Глобальны
 Перед реальным применением прочитайте
 [модель угроз](docs/THREAT_MODEL.md) и
 [формат графа](docs/GRAPH_FORMAT.md), а также
-[правила работы с receipt keys](docs/RECEIPT_KEYS.md) и
-[AWS role-session containment](docs/AWS_ROLE_SESSIONS.md). Точные permissions и
+[правила работы с receipt keys](docs/RECEIPT_KEYS.md). Точные permissions и
 версии provider CLI описаны в
 [`docs/PROVIDER_REQUIREMENTS.md`](docs/PROVIDER_REQUIREMENTS.md), стабильные
 гарантии — в [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md).

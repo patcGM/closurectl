@@ -4,7 +4,6 @@ altgraph==0.17.5
 bandit==1.9.4
 build==1.6.1
 cffi==2.1.1
-cfn-lint==1.58.0
 coverage==7.16.2
 cryptography==50.0.2
 cyclonedx-bom==7.5.0

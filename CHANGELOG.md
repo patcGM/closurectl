@@ -9,11 +9,9 @@ Versioning after the first public release.
 
 - strict JSON, timestamp, target URI, provider-output, pagination, and process
   output bounds with cross-platform Unicode handling;
-- unique preview-bound AWS role-session containment policies protected by IAM
-  `RoleId`, exact observer reconciliation, and old/new session canaries;
 - strict inventory runtime schemas, source-digest/JSON-path provenance,
   freshness enforcement, conflict rejection, and an overwrite-safe TTY wizard;
-- read-only clean-machine readiness checks for independent GitHub, npm, and AWS
+- read-only clean-machine readiness checks for independent GitHub and npm
   mutation and recovery identities before exact-target preview;
 - centralized output/input collision refusal, including hard-link and symlink
   aliases, to protect source artifacts, provider configs, signing keys, and
@@ -23,7 +21,7 @@ Versioning after the first public release.
 
 ### Release engineering
 
-- exact-SHA full CI, independent review, disposable GitHub/npm/AWS drills,
+- exact-SHA full CI, independent review, a disposable GitHub/npm drill,
   signed tags, checked-in release notes, and protected-environment approval are
   mandatory for stable publication;
 - stable compatibility, provider requirements, support routing, checksum, and
@@ -33,20 +31,16 @@ Versioning after the first public release.
 
 ### Added
 
-- human-confirmed incident drafts built from bounded GitHub, npm, and AWS
+- human-confirmed incident drafts built from bounded GitHub and npm
   inventories, with an interactive wizard and exact non-interactive selection;
 - deterministic, self-contained HTML reports and timelines generated only
   after receipt-signature verification;
-- allow-listed AWS IAM role inventory and unique preview-bound
-  `ClosureCtlRevokeOlderSessions-*` execution through independent mutation and
-  observer profiles without overwriting `AWSRevokeOlderSessions`;
-- protected disposable AWS/OIDC provider-lab workflow;
 - Linux arm64 and native macOS arm64/x86-64 binary build matrices.
 
 ### Changed
 
 - release publication now verifies a successful destructive provider-lab run
-  for GitHub/npm and AWS on the exact tagged commit instead of trusting mutable
+  for GitHub/npm on the exact tagged commit instead of trusting mutable
   repository metadata;
 - GitHub Actions dependencies are updated and remain pinned to full commit
   SHAs;

@@ -55,7 +55,6 @@
     },
     "operation": {
       "enum": [
-        "aws.revoke_role_sessions",
         "github.disable_workflow",
         "github.cancel_run",
         "npm.revoke_token"

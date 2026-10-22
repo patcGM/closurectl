@@ -101,28 +101,25 @@ jobs:
               and .commit_id == $head
             )] | sort_by(.submitted_at) | last | .state // empty')" = "APPROVED"
 
-          for WORKFLOW in provider-lab.yml aws-provider-lab.yml; do
-            LAB_RUNS="$(curl --fail --silent --show-error \
-              --header "Authorization: Bearer ${GH_API_TOKEN}" \
-              --header "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/${WORKFLOW}/runs?branch=main&event=workflow_dispatch&status=success&head_sha=${GITHUB_SHA}&per_page=1")"
-            test "$(printf '%s' "${LAB_RUNS}" | jq --arg sha "${GITHUB_SHA}" \
-              '[.workflow_runs[] | select(
-                .head_sha == $sha
-                and .head_branch == "main"
-                and .event == "workflow_dispatch"
-                and .conclusion == "success"
-              )] | length')" -ge 1
-          done
+          LAB_RUNS="$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer ${GH_API_TOKEN}" \
+            --header "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/provider-lab.yml/runs?branch=main&event=workflow_dispatch&status=success&head_sha=${GITHUB_SHA}&per_page=1")"
+          test "$(printf '%s' "${LAB_RUNS}" | jq --arg sha "${GITHUB_SHA}" \
+            '[.workflow_runs[] | select(
+              .head_sha == $sha
+              and .head_branch == "main"
+              and .event == "workflow_dispatch"
+              and .conclusion == "success"
+            )] | length')" -ge 1
 
       - name: Install release tools
-        run: python -m pip install ".[dev]" bandit cfn-lint pip-audit twine cyclonedx-bom
+        run: python -m pip install ".[dev]" bandit pip-audit twine cyclonedx-bom
 
       - name: Run quality gate
         run: |
           ruff check .
           ruff format --check .
-          cfn-lint labs/aws/cloudformation.yml
           bandit -q -r src
           python -m pip_audit --strict -r requirements/release-constraints.txt
           python -m coverage run -m unittest discover -s tests -v

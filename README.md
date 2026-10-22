@@ -16,7 +16,7 @@ cuts and signs the resulting observations.
 
 > [!IMPORTANT]
 > `closurectl` performs real, high-impact mutations on exact GitHub Actions,
-> npm token, and AWS IAM role targets. Every mutation requires a short-lived
+> and npm token targets. Every mutation requires a short-lived
 > preview, exact digest confirmation, a separate recovery identity, a
 > hash-chained journal, and independent observation. Never interpret `CLOSED`
 > as proof of global attacker eviction.
@@ -40,7 +40,7 @@ compromised workstation
 ├── GitHub session ────────────────> repository administration
 │   └── Actions OIDC ─────────────> production
 ├── queued deployment ────────────> production
-├── already-issued AWS session ───> production
+├── already-issued cloud session ─> production
 └── npm publication credential ───> package registry
 ```
 
@@ -58,16 +58,16 @@ compromised workstation
   without reading or changing a target;
 - refuses output paths that resolve to an input artifact or active provider
   config, including hard-link and symlink aliases;
-- collects bounded, read-only GitHub, npm, and AWS metadata through explicit
+- collects bounded, read-only GitHub and npm metadata through explicit
   allow-lists;
-- turns GitHub, npm, and AWS inventories into a reviewable incident draft and
+- turns GitHub and npm inventories into a reviewable incident draft and
   requires explicit candidate selection plus digest confirmation before a
   graph exists;
 - renders a deterministic, offline HTML timeline from a verified signed
   receipt and optional execution journal;
 - disables one exact GitHub workflow, cancels one exact Actions
-  run, revokes one exact npm token, or revokes older sessions for one exact AWS
-  IAM role with reconciliation and an append-only hash-chained journal.
+  run, or revokes one exact npm token with reconciliation and an append-only
+  hash-chained journal.
 
 ## 60-second demo
 
@@ -99,7 +99,7 @@ status: PLANNED
 actions: 5
   1. [stop_minting] github:disable_workflow -> release.yml
   2. [cancel_pending] github:cancel_workflow_run -> queued-production-deploy
-  3. [revoke_descendants] aws:invalidate_role_sessions -> production-deployer
+  3. [revoke_descendants] manual:invalidate_cloud_sessions -> production-deployer
   4. [revoke_roots] npm:revoke_publication_credential -> affected-maintainer
   5. [revoke_roots] github:revoke_session -> maintainer-session
 receipt: CLOSED
@@ -240,13 +240,12 @@ you expect to use:
 ```bash
 closurectl readiness \
   --provider github \
-  --provider npm \
-  --provider aws
+  --provider npm
 ```
 
 The command is read-only. It verifies that GitHub uses two accounts, npm uses
 different credential material for the same account with npm 11.18.0 and a
-working recovery token listing, and AWS uses two principals in one account.
+working recovery token listing.
 It emits only provider identities and credential fingerprints, never credential
 values. A failed provider is `NOT_READY`, all selected providers are still
 reported, and the command exits with code `5`. Put global `--json` before
@@ -298,22 +297,6 @@ closurectl inventory npm \
 
 Inventory accepts at most 50 packages and 1,000 items per collection.
 
-### AWS IAM
-
-AWS inventory uses an explicit, read-only AWS CLI profile and exact role names.
-Environment access keys are not forwarded to the child process:
-
-```bash
-closurectl inventory aws \
-  --profile incident-observer \
-  --role ProductionDeployer \
-  --out aws-inventory.json
-```
-
-It records allow-listed role metadata and GitHub OIDC trust conditions for the
-named roles only. Service-linked and IAM Identity Center managed roles are not
-executable.
-
 ## Inventory-to-graph incident wizard
 
 Provider metadata never becomes an authority claim automatically. First create
@@ -324,7 +307,6 @@ closurectl incident draft \
   --title "Compromised release identity" \
   --github-inventory github-inventory.json \
   --npm-inventory npm-inventory.json \
-  --aws-inventory aws-inventory.json \
   --out incident-draft.json
 ```
 
@@ -340,7 +322,6 @@ or select exact candidate IDs non-interactively and confirm the printed
 ```bash
 closurectl incident build incident-draft.json \
   --select github:OWNER/REPO:disable-workflow:WORKFLOW_ID \
-  --select aws:123456789012:revoke-role-sessions:ProductionDeployer \
   --confirm DRAFT_DIGEST \
   --out authority-graph.json
 ```
@@ -359,8 +340,6 @@ machine. Only these exact contracts are executable:
   `github://OWNER/REPO/actions/runs/NUMERIC_ID`;
 - `npm:revoke_token` with
   `npm://registry.npmjs.org/tokens/FULL_TOKEN_ID`.
-- `aws:revoke_role_sessions` with
-  `aws://ACCOUNT_ID/iam/roles/ROLE_NAME`.
 
 GitHub requires credentials for two different accounts:
 
@@ -377,22 +356,6 @@ mutation config:
 export CLOSURECTL_NPM_MUTATION_USERCONFIG="$HOME/.npmrc-mutation"
 export CLOSURECTL_NPM_RECOVERY_USERCONFIG="$HOME/.npmrc-recovery"
 ```
-
-AWS requires two different CLI profiles for different principals in the same
-account:
-
-```bash
-export CLOSURECTL_AWS_MUTATION_PROFILE="incident-mutation"
-export CLOSURECTL_AWS_OBSERVER_PROFILE="incident-observer"
-```
-
-AWS role-session revocation creates a unique
-`ClosureCtlRevokeOlderSessions-*` inline deny policy. Its name, cutoff,
-document digest, target, and immutable IAM `RoleId` are fixed by the confirmed
-preview; the shared `AWSRevokeOlderSessions` policy is never overwritten. It
-affects every session for the role issued before that cutoff, not one
-individual attacker session. Independent evidence requires that exact policy
-and remains `INDETERMINATE` during the five-minute IAM propagation window.
 
 Never pass an OTP in command-line arguments. If npm requires one, provide it
 through npm's protected environment/config mechanism and remove it
@@ -451,8 +414,7 @@ artifacts describe only declared scope.
 
 Read the full [threat model](docs/THREAT_MODEL.md) and
 [graph format](docs/GRAPH_FORMAT.md), and follow the
-[receipt key guidance](docs/RECEIPT_KEYS.md) and
-[AWS role-session guidance](docs/AWS_ROLE_SESSIONS.md), review the
+[receipt key guidance](docs/RECEIPT_KEYS.md), review the
 [provider requirements](docs/PROVIDER_REQUIREMENTS.md), and understand the
 [compatibility policy](docs/COMPATIBILITY.md) before using real incident data.
 Machine-readable formats are published in [`schemas/`](schemas/).
@@ -466,16 +428,16 @@ observed live containment, and signed reporting:
 - minimum-cut planner;
 - signed receipts;
 - offline demonstration;
-- bounded GitHub, npm, and AWS IAM inventories;
+- bounded GitHub and npm inventories;
 - human-confirmed inventory-to-graph drafts and an incident wizard;
 - clean-machine checks for independent recovery identities;
 - deterministic offline HTML reports and execution timelines;
 - exact preview/confirm and resumable provider execution;
 - independent provider evidence v2 and signing-key fingerprints.
 
-AWS and GitHub/npm publication are release-gated by protected disposable labs
-on the exact tagged commit. The 1.0.0 tag and release remain blocked until the
-final metadata commit passes those drills, full CI, and independent review.
+GitHub/npm publication is release-gated by a protected disposable lab on the
+exact tagged commit. The 1.0.0 tag and release remain blocked until the final
+metadata commit passes that drill, full CI, and independent review.
 Planned work is tracked in [ROADMAP.md](ROADMAP.md).
 
 ## Contributing and security reports

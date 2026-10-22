@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from . import __version__
-from .adapters.aws import collect_aws_inventory
 from .adapters.github import collect_github_inventory
 from .adapters.npm import collect_npm_inventory, require_supported_npm_version
 from .demo import closed_evidence, compromised_maintainer_graph
@@ -22,7 +21,6 @@ from .execution import (
     read_execution_journal,
     validate_execution_preview,
 )
-from .executors.aws import AwsExecutor
 from .executors.github import GitHubExecutor
 from .executors.npm import NpmExecutor
 from .incident import (
@@ -126,20 +124,6 @@ def _parser() -> argparse.ArgumentParser:
     )
     npm.add_argument("-o", "--out", required=True, help="inventory output path")
 
-    aws = providers.add_parser("aws", help="inventory exact AWS IAM roles")
-    aws.add_argument(
-        "--role",
-        action="append",
-        required=True,
-        help="IAM role name; repeat for multiple roles",
-    )
-    aws.add_argument(
-        "--profile",
-        default=os.environ.get("AWS_PROFILE", ""),
-        help="read-only AWS CLI profile (defaults to AWS_PROFILE)",
-    )
-    aws.add_argument("-o", "--out", required=True, help="inventory output path")
-
     incident = commands.add_parser(
         "incident",
         help="turn provider inventories into a human-confirmed authority graph",
@@ -162,12 +146,6 @@ def _parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         help="npm inventory JSON; repeat to combine snapshots",
-    )
-    incident_draft.add_argument(
-        "--aws-inventory",
-        action="append",
-        default=[],
-        help="AWS IAM inventory JSON; repeat to combine snapshots",
     )
     incident_draft.add_argument("-o", "--out", required=True, help="draft output path")
 
@@ -309,14 +287,6 @@ def _provider_executors(plan: ClosurePlan) -> dict[str, Any]:
             recovery_config,
             registry=os.environ.get("CLOSURECTL_NPM_REGISTRY", "https://registry.npmjs.org"),
         )
-    if "aws" in providers:
-        mutation_profile = os.environ.get("CLOSURECTL_AWS_MUTATION_PROFILE", "")
-        observer_profile = os.environ.get("CLOSURECTL_AWS_OBSERVER_PROFILE", "")
-        if not mutation_profile or not observer_profile:
-            raise ValidationError(
-                "set CLOSURECTL_AWS_MUTATION_PROFILE and CLOSURECTL_AWS_OBSERVER_PROFILE"
-            )
-        executors["aws"] = AwsExecutor(mutation_profile, observer_profile)
     return executors
 
 
@@ -374,8 +344,6 @@ def _provider_config_paths() -> list[Path]:
             "CLOSURECTL_NPM_MUTATION_USERCONFIG",
             "CLOSURECTL_NPM_RECOVERY_USERCONFIG",
             "NPM_CONFIG_USERCONFIG",
-            "AWS_CONFIG_FILE",
-            "AWS_SHARED_CREDENTIALS_FILE",
         )
     ]
     homes = {
@@ -386,15 +354,7 @@ def _provider_config_paths() -> list[Path]:
         )
         if value
     }
-    defaults = [
-        candidate
-        for home in homes
-        for candidate in (
-            Path(home) / ".npmrc",
-            Path(home) / ".aws" / "config",
-            Path(home) / ".aws" / "credentials",
-        )
-    ]
+    defaults = [candidate for home in homes for candidate in (Path(home) / ".npmrc",)]
     return [Path(value) for value in configured if value] + defaults
 
 
@@ -616,15 +576,11 @@ def _execute(arguments: argparse.Namespace) -> int:
                 arguments.repo,
                 api_url=arguments.api_url,
             )
-        elif arguments.provider == "npm":
+        else:
             snapshot = collect_npm_inventory(
                 arguments.package,
                 registry=arguments.registry,
             )
-        else:
-            if not arguments.profile:
-                raise ValidationError("set AWS_PROFILE or pass --profile")
-            snapshot = collect_aws_inventory(arguments.role, profile=arguments.profile)
         validate_provider_inventory(snapshot)
         write_json(arguments.out, snapshot)
         destination = str(Path(arguments.out).resolve())
@@ -646,7 +602,6 @@ def _execute(arguments: argparse.Namespace) -> int:
             inventory_paths = [
                 *arguments.github_inventory,
                 *arguments.npm_inventory,
-                *arguments.aws_inventory,
             ]
             if not inventory_paths:
                 raise ValidationError("provide at least one GitHub or npm inventory")

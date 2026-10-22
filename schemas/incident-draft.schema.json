@@ -40,7 +40,6 @@
         "properties": {
           "adapter": {
             "enum": [
-              "aws-iam-read-only",
               "github-read-only",
               "npm-read-only"
             ]

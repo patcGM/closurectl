@@ -10,7 +10,6 @@ from unittest.mock import patch
 
 from closurectl.cli import main
 from closurectl.errors import ExecutionError, ValidationError
-from closurectl.executors.aws import AwsExecutor
 from closurectl.executors.github import GitHubExecutor
 from closurectl.executors.npm import NpmExecutor
 from closurectl.readiness import _CHECKS, assess_readiness
@@ -50,25 +49,6 @@ class ReadinessTests(unittest.TestCase):
         self.assertNotIn("mutation-secret", repr(result))
         self.assertNotIn("recovery-secret", repr(result))
 
-    @patch("closurectl.executors.aws._identity")
-    def test_aws_readiness_requires_distinct_principals_in_one_account(self, identity) -> None:
-        identity.side_effect = [
-            {
-                "account": "123456789012",
-                "arn": "arn:aws:iam::123456789012:role/mutator",
-                "user_id": "AROA_MUTATOR:session",
-            },
-            {
-                "account": "123456789012",
-                "arn": "arn:aws:iam::123456789012:role/observer",
-                "user_id": "AROA_OBSERVER:session",
-            },
-        ]
-        result = AwsExecutor("mutation", "observer").readiness()
-        self.assertEqual(result["provider_account"], "123456789012")
-        self.assertEqual(result["mutation_identity"], "aws-principal:AROA_MUTATOR")
-        self.assertEqual(result["observer_identity"], "aws-principal:AROA_OBSERVER")
-
     def test_assessment_reports_every_selected_provider_failure(self) -> None:
         def ready(_environment):
             return {
@@ -81,8 +61,8 @@ class ReadinessTests(unittest.TestCase):
         def not_ready(_environment):
             raise ValidationError("observer profile is unavailable")
 
-        with patch.dict(_CHECKS, {"github": ready, "aws": not_ready}, clear=False):
-            result = assess_readiness(["github", "aws"], environment={})
+        with patch.dict(_CHECKS, {"github": ready, "npm": not_ready}, clear=False):
+            result = assess_readiness(["github", "npm"], environment={})
         self.assertEqual(result["status"], "NOT_READY")
         self.assertEqual([item["status"] for item in result["providers"]], ["READY", "NOT_READY"])
         self.assertEqual(result["providers"][1]["error"], "observer profile is unavailable")
@@ -99,21 +79,16 @@ class ReadinessTests(unittest.TestCase):
             "CLOSURECTL_GITHUB_OBSERVER_TOKEN": "github-observer",
             "CLOSURECTL_NPM_MUTATION_USERCONFIG": "mutation.npmrc",
             "CLOSURECTL_NPM_RECOVERY_USERCONFIG": "recovery.npmrc",
-            "CLOSURECTL_AWS_MUTATION_PROFILE": "mutation",
-            "CLOSURECTL_AWS_OBSERVER_PROFILE": "observer",
         }
         with (
             patch("closurectl.readiness.GitHubExecutor") as github,
             patch("closurectl.readiness.NpmExecutor") as npm,
-            patch("closurectl.readiness.AwsExecutor") as aws,
         ):
-            for constructor in (github, npm, aws):
+            for constructor in (github, npm):
                 constructor.return_value.readiness.return_value = details
-            result = assess_readiness(["github", "npm", "aws"], environment=environment)
+            result = assess_readiness(["github", "npm"], environment=environment)
         self.assertEqual(result["status"], "READY")
-        self.assertEqual(
-            [item["provider"] for item in result["providers"]], ["github", "npm", "aws"]
-        )
+        self.assertEqual([item["provider"] for item in result["providers"]], ["github", "npm"])
         github.assert_called_once_with(
             "github-mutation",
             "github-observer",
@@ -124,7 +99,6 @@ class ReadinessTests(unittest.TestCase):
             "recovery.npmrc",
             registry="https://registry.npmjs.org",
         )
-        aws.assert_called_once_with("mutation", "observer")
 
     def test_assessment_rejects_duplicate_providers(self) -> None:
         with self.assertRaisesRegex(ValidationError, "unique"):

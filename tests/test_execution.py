@@ -208,16 +208,6 @@ class ExecutionTests(unittest.TestCase):
                 with self.assertRaises(ValidationError):
                     parse_execution_target(invalid)
 
-        aws = PlanAction(
-            action_id="close:aws",
-            edge_id="aws",
-            provider="aws",
-            operation="revoke_role_sessions",
-            target="aws://123456789012/iam/roles/.",
-            phase="revoke_descendants",
-            cost=1,
-            reason="test",
-        )
         npm = PlanAction(
             action_id="close:npm",
             edge_id="npm",
@@ -228,9 +218,8 @@ class ExecutionTests(unittest.TestCase):
             cost=1,
             reason="test",
         )
-        for invalid in (aws, npm):
-            with self.assertRaises(ValidationError):
-                parse_execution_target(invalid)
+        with self.assertRaises(ValidationError):
+            parse_execution_target(npm)
 
     def test_rfc3339_parser_is_strict(self) -> None:
         self.assertEqual(
