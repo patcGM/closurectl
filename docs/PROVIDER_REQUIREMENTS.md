@@ -53,4 +53,6 @@ export CLOSURECTL_NPM_RECOVERY_USERCONFIG="$HOME/.npmrc-recovery"
 The recovery credential must remain valid after the exact mutation token is
 revoked and must be able to list token metadata. Never pass an OTP on the
 command line. The release drill pins npm 11.18.0 and waits the full documented
-propagation safety window before observation.
+propagation safety window before observation. Both legacy and granular token
+metadata are normalized to the same secret-free inventory shape; token values
+and partial keys are never persisted.

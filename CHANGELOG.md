@@ -11,6 +11,8 @@ Versioning after the first public release.
   output bounds with cross-platform Unicode handling;
 - strict inventory runtime schemas, source-digest/JSON-path provenance,
   freshness enforcement, conflict rejection, and an overwrite-safe TTY wizard;
+- secret-free normalization for both legacy and granular npm token-list
+  metadata from npm CLI 11.18.0;
 - read-only clean-machine readiness checks for independent GitHub and npm
   mutation and recovery identities before exact-target preview;
 - centralized output/input collision refusal, including hard-link and symlink
