@@ -95,6 +95,9 @@ jobs:
             echo "CLOSURECTL_AWS_OBSERVER_PROFILE=closurectl-observer"
           } >> "${GITHUB_ENV}"
 
+      - name: Verify clean-machine recovery readiness
+        run: closurectl readiness --provider aws
+
       - name: Build exact disposable graph and plan
         env:
           AWS_ACCOUNT_ID: ${{ inputs.aws_account_id }}

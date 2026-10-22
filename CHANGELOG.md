@@ -13,6 +13,8 @@ Versioning after the first public release.
   `RoleId`, exact observer reconciliation, and old/new session canaries;
 - strict inventory runtime schemas, source-digest/JSON-path provenance,
   freshness enforcement, conflict rejection, and an overwrite-safe TTY wizard;
+- read-only clean-machine readiness checks for independent GitHub, npm, and AWS
+  mutation and recovery identities before exact-target preview;
 - evidence-bound HTML reporting with full journal validation, restrictive CSP,
   control-character neutralization, collision refusal, and output SHA-256.
 

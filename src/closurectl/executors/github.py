@@ -116,14 +116,35 @@ class GitHubExecutor:
             "resource": resource,
         }
 
-    def binding(self, action: PlanAction, target: ExecutionTarget) -> dict[str, str]:
-        del action
-        mutation_login, mutation_id = _identity(self._mutation)
-        observer_login, observer_id = _identity(self._observer)
-        if mutation_id == observer_id:
+    def _identities(self) -> tuple[tuple[str, int], tuple[str, int]]:
+        mutation = _identity(self._mutation)
+        observer = _identity(self._observer)
+        if mutation[1] == observer[1]:
             raise ExecutionError(
                 "GitHub observer must be a different account to preserve break-glass access"
             )
+        return mutation, observer
+
+    def readiness(self) -> dict[str, Any]:
+        """Authenticate both identities without reading or mutating a repository."""
+        (mutation_login, mutation_id), (observer_login, observer_id) = self._identities()
+        return {
+            "api_origin": self._mutation.api_url,
+            "mutation_identity": f"github:{mutation_login}#{mutation_id}",
+            "observer_identity": f"github:{observer_login}#{observer_id}",
+            "checks": [
+                "mutation credential authenticated",
+                "observer credential authenticated",
+                "mutation and observer accounts are distinct",
+            ],
+            "limitations": [
+                "Repository permissions and exact-target visibility are checked by execute preview."
+            ],
+        }
+
+    def binding(self, action: PlanAction, target: ExecutionTarget) -> dict[str, str]:
+        del action
+        (mutation_login, mutation_id), (observer_login, observer_id) = self._identities()
         return {
             "provider_account": target.repository,
             "api_origin": self._mutation.api_url,

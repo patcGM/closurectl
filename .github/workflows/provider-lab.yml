@@ -96,6 +96,12 @@ jobs:
           echo "CLOSURECTL_NPM_MUTATION_USERCONFIG=${RUNNER_TEMP}/mutation.npmrc" >> "${GITHUB_ENV}"
           echo "CLOSURECTL_NPM_RECOVERY_USERCONFIG=${RUNNER_TEMP}/recovery.npmrc" >> "${GITHUB_ENV}"
 
+      - name: Verify clean-machine recovery readiness
+        env:
+          GITHUB_TOKEN: ${{ secrets.LAB_GITHUB_MUTATION_TOKEN }}
+          CLOSURECTL_GITHUB_OBSERVER_TOKEN: ${{ secrets.LAB_GITHUB_OBSERVER_TOKEN }}
+        run: closurectl readiness --provider github --provider npm
+
       - name: Build exact disposable graph and plan
         env:
           LAB_REPOSITORY: ${{ inputs.github_repository }}

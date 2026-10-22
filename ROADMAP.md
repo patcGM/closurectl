@@ -47,7 +47,7 @@ provider request is used as closure evidence.
 - [ ] successful disposable AWS role-session drill on the release commit
 - [ ] independent 1.0.0 review from `test2GM`
 - [ ] containment SLO measurement
-- [ ] clean-machine recovery readiness checks
+- [x] clean-machine recovery readiness checks
 - [x] retain exact preview/confirm controls without a hidden feature flag
 
 ## Additional mutation adapters: gated

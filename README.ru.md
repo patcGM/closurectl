@@ -147,6 +147,30 @@ closurectl report authority-graph.json closure-plan.json closure-receipt.json `
 
 Приватный ключ нельзя хранить на заражённой машине или добавлять в git.
 
+## Проверка recovery readiness на чистой машине
+
+До инцидента настройте на заведомо чистой машине mutation и
+observer/recovery credentials, описанные ниже, и проверьте только нужные
+провайдеры:
+
+```powershell
+closurectl readiness `
+  --provider github `
+  --provider npm `
+  --provider aws
+```
+
+Команда выполняет только read-only запросы. Она проверяет, что GitHub использует
+две разные accounts, npm — разные credentials одной account, npm CLI 11.18.0 и
+доступный recovery token listing, а AWS — два разных principals одной account.
+Значения credentials не выводятся. Ошибка одного провайдера даёт `NOT_READY`,
+но остальные проверки продолжаются; exit code равен `5`. Для
+machine-readable результата укажите глобальный `--json` перед `readiness`.
+
+Readiness не читает incident target и не доказывает target permissions. Перед
+любой mutation команда `execute preview` по-прежнему проверяет точный resource,
+его текущее состояние и permissions.
+
 ## Инвентаризация GitHub
 
 Токен передаётся только через переменную окружения и не сохраняется:
@@ -218,7 +242,7 @@ closurectl incident wizard incident-draft.json --out authority-graph.json
 ## Контролируемый live containment
 
 Запускайте мутации только с чистой машины и заранее проверенной recovery
-identity. Исполнимы только три точных контракта:
+identity. Исполнимы только четыре точных контракта:
 
 - `github:disable_workflow` и target
   `github://OWNER/REPO/actions/workflows/NUMERIC_ID`;
@@ -295,8 +319,8 @@ evidence закрытия.
 
 Exit codes: `0` — закрыто/успешно, `2` — ошибка входных данных или провайдера,
 `3` — `BLOCKED`, `4` — корректный, но не закрытый receipt, `5` — незавершённые
-execution/evidence, `130` — прерывание. Глобальный `--json` перед командой
-выводит machine-readable summary.
+readiness/execution/evidence, `130` — прерывание. Глобальный `--json` перед
+командой выводит machine-readable summary.
 
 ## Статусы
 

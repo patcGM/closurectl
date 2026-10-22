@@ -8,7 +8,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from ..adapters.npm import DEFAULT_REGISTRY, _registry_url, _run_npm, _safe_token_metadata
+from ..adapters.npm import (
+    DEFAULT_REGISTRY,
+    SUPPORTED_NPM_VERSION,
+    _registry_url,
+    _run_npm,
+    _safe_token_metadata,
+    require_supported_npm_version,
+)
 from ..errors import AdapterError, ExecutionError
 from ..execution_models import ExecutionTarget, parse_rfc3339
 from ..models import PlanAction
@@ -119,6 +126,40 @@ class NpmExecutor:
             for item in self._tokens(self._recovery_config)
         )
 
+    def _identities(self) -> tuple[str, str]:
+        mutation_identity = self._whoami(self._mutation_config)
+        recovery_identity = self._whoami(self._recovery_config)
+        if mutation_identity != recovery_identity:
+            raise ExecutionError(
+                "npm mutation and recovery configs must authenticate the same account"
+            )
+        return mutation_identity, recovery_identity
+
+    def readiness(self) -> dict[str, Any]:
+        """Verify the recovery configuration without revoking a token."""
+        require_supported_npm_version()
+        mutation_identity, recovery_identity = self._identities()
+        self._tokens(self._recovery_config)
+        return {
+            "provider_account": mutation_identity,
+            "api_origin": self._registry,
+            "mutation_identity": (
+                f"npm:{mutation_identity}:credential:SHA256:{self._mutation_fingerprint}"
+            ),
+            "observer_identity": (
+                f"npm:{recovery_identity}:credential:SHA256:{self._recovery_fingerprint}"
+            ),
+            "checks": [
+                f"npm CLI version is {SUPPORTED_NPM_VERSION}",
+                "mutation and recovery credential material is distinct",
+                "mutation and recovery configs authenticate the same account",
+                "recovery config can list credential metadata",
+            ],
+            "limitations": [
+                "Exact token visibility and revoke permission are checked by execute preview."
+            ],
+        }
+
     def preview(self, action: PlanAction, target: ExecutionTarget) -> dict[str, Any]:
         binding = self.binding(action, target)
         target_metadata = next(
@@ -165,12 +206,7 @@ class NpmExecutor:
 
     def binding(self, action: PlanAction, target: ExecutionTarget) -> dict[str, str]:
         del action, target
-        mutation_identity = self._whoami(self._mutation_config)
-        recovery_identity = self._whoami(self._recovery_config)
-        if mutation_identity != recovery_identity:
-            raise ExecutionError(
-                "npm mutation and recovery configs must authenticate the same account"
-            )
+        mutation_identity, recovery_identity = self._identities()
         return {
             "provider_account": mutation_identity,
             "api_origin": self._registry,

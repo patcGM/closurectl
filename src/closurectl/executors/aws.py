@@ -222,16 +222,43 @@ class AwsExecutor:
             "policy": policy,
         }
 
-    def binding(self, action: PlanAction, target: ExecutionTarget) -> dict[str, str]:
-        del action
+    def _identities(
+        self,
+    ) -> tuple[Mapping[str, str], Mapping[str, str], str, str]:
         mutation = _identity(self._mutation_profile)
         observer = _identity(self._observer_profile)
-        if mutation["account"] != target.account or observer["account"] != target.account:
-            raise ExecutionError("AWS profiles and exact role target must use the same account")
+        if mutation["account"] != observer["account"]:
+            raise ExecutionError("AWS mutation and observer profiles must use the same account")
         mutation_principal = _principal_id(mutation)
         observer_principal = _principal_id(observer)
         if mutation_principal == observer_principal:
             raise ExecutionError("AWS observer must be a different principal")
+        return mutation, observer, mutation_principal, observer_principal
+
+    def readiness(self) -> dict[str, Any]:
+        """Authenticate both profiles without reading or mutating an IAM role."""
+        mutation, _, mutation_principal, observer_principal = self._identities()
+        return {
+            "provider_account": mutation["account"],
+            "api_origin": self.api_origin,
+            "mutation_identity": f"aws-principal:{mutation_principal}",
+            "observer_identity": f"aws-principal:{observer_principal}",
+            "checks": [
+                "mutation profile authenticated",
+                "observer profile authenticated",
+                "profiles use the same AWS account",
+                "mutation and observer principals are distinct",
+            ],
+            "limitations": [
+                "Exact-role read and write permissions are checked by execute preview."
+            ],
+        }
+
+    def binding(self, action: PlanAction, target: ExecutionTarget) -> dict[str, str]:
+        del action
+        mutation, observer, mutation_principal, observer_principal = self._identities()
+        if mutation["account"] != target.account or observer["account"] != target.account:
+            raise ExecutionError("AWS profiles and exact role target must use the same account")
         return {
             "provider_account": target.account,
             "api_origin": self.api_origin,

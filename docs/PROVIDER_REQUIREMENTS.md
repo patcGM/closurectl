@@ -3,6 +3,21 @@
 Live commands are attended, exact-target operations. Grant only the permissions
 below and keep mutation credentials separate from observer/recovery credentials.
 
+## Readiness preflight
+
+On a known-clean machine, set the credentials for the providers in scope and
+run:
+
+```bash
+closurectl readiness --provider github --provider npm --provider aws
+```
+
+This read-only preflight authenticates both identities, verifies their required
+separation, checks npm 11.18.0, and confirms that the npm recovery identity can
+list token metadata. It does not inspect a target or prove resource-specific
+permissions. A fresh `execute preview` remains mandatory and performs those
+exact-target checks.
+
 ## GitHub
 
 Use two different GitHub accounts. For the exact target repository:
