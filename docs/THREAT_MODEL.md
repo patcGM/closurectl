@@ -73,8 +73,8 @@ plan actions remain descriptive metadata.
 1. **Credential-minimizing artifacts.** Artifacts reject common
    plaintext-secret field names and provider adapters allow-list returned
    metadata. This is a guardrail, not proof that arbitrary text is secret-free.
-2. **Read-only commands stay read-only.** `inventory`, `plan`, `observe`, and
-   `verify` never request a provider mutation.
+2. **Read-only commands stay read-only.** `readiness`, `inventory`, `plan`,
+   `observe`, and `verify` never request a provider mutation.
 3. **No silent success.** Missing checks yield `PARTIAL` or `INDETERMINATE`.
 4. **No cut through an unenforceable edge.** Non-revocable edges have
    effectively infinite cut cost.

@@ -54,6 +54,8 @@ compromised workstation
 - creates deterministic plan digests;
 - signs evidence receipts with Ed25519;
 - reports `CLOSED`, `PARTIAL`, `OPEN`, `INDETERMINATE`, or `BLOCKED`;
+- checks clean-machine mutation and recovery identities before an incident,
+  without reading or changing a target;
 - collects bounded, read-only GitHub, npm, and AWS metadata through explicit
   allow-lists;
 - turns GitHub, npm, and AWS inventories into a reviewable incident draft and
@@ -226,6 +228,31 @@ receipt and prints the SHA-256 of the generated HTML. See
 [`docs/INCIDENT_REPORTS.md`](docs/INCIDENT_REPORTS.md).
 
 Keep the private key outside the affected host and out of the repository.
+
+## Clean-machine recovery readiness
+
+Before an incident, configure the mutation and observer/recovery credentials
+described below on a known-clean machine, then authenticate only the providers
+you expect to use:
+
+```bash
+closurectl readiness \
+  --provider github \
+  --provider npm \
+  --provider aws
+```
+
+The command is read-only. It verifies that GitHub uses two accounts, npm uses
+different credential material for the same account with npm 11.18.0 and a
+working recovery token listing, and AWS uses two principals in one account.
+It emits only provider identities and credential fingerprints, never credential
+values. A failed provider is `NOT_READY`, all selected providers are still
+reported, and the command exits with code `5`. Put global `--json` before
+`readiness` for machine-readable output.
+
+Readiness does not inspect an incident target or prove target permissions.
+`execute preview` still checks exact resources, current state, and provider
+permissions before any mutation.
 
 ## Read-only provider inventory
 
@@ -402,8 +429,9 @@ as closure evidence.
 
 Exit codes are `0` for the requested closed/success state, `2` for validation
 or provider errors, `3` for a blocked plan, `4` for a valid but non-closed
-receipt, `5` for incomplete execution/evidence, and `130` for interruption.
-Use global `--json` before the command for machine-readable command summaries.
+receipt, `5` for incomplete readiness/execution/evidence, and `130` for
+interruption. Use global `--json` before the command for machine-readable
+command summaries.
 
 ## Security model
 
@@ -438,6 +466,7 @@ observed live containment, and signed reporting:
 - offline demonstration;
 - bounded GitHub, npm, and AWS IAM inventories;
 - human-confirmed inventory-to-graph drafts and an incident wizard;
+- clean-machine checks for independent recovery identities;
 - deterministic offline HTML reports and execution timelines;
 - exact preview/confirm and resumable provider execution;
 - independent provider evidence v2 and signing-key fingerprints.

@@ -39,6 +39,8 @@
 - Confirm the full `ci.yml` workflow is successful on the exact candidate SHA.
 - Obtain an independent approval from `test2GM` on the associated pull request;
   release automation checks that the latest review remains approved.
+- Confirm each provider lab reports `READY` for its independent mutation and
+  recovery identities before it creates an exact-target preview.
 - Review every operation and immutable target in the provider-lab preview.
 - Merge the reviewed candidate to `main`, then run
   `.github/workflows/provider-lab.yml` on that exact merge commit against a

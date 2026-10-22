@@ -33,6 +33,7 @@ from .incident import (
 )
 from .models import AuthorityGraph, ClosurePlan
 from .planner import plan_closure
+from .readiness import READINESS_PROVIDERS, assess_readiness
 from .receipts import (
     create_receipt,
     generate_keypair,
@@ -79,6 +80,18 @@ def _parser() -> argparse.ArgumentParser:
     verify.add_argument("--public-key", required=True, help="Ed25519 public key")
     verify.add_argument("--graph", required=True, help="authority graph used by the plan")
     verify.add_argument("--plan", required=True, help="closure plan to recompute and compare")
+
+    readiness = commands.add_parser(
+        "readiness",
+        help="verify break-glass provider identities without mutation",
+    )
+    readiness.add_argument(
+        "--provider",
+        action="append",
+        choices=READINESS_PROVIDERS,
+        required=True,
+        help="provider to check; repeat to check multiple providers",
+    )
 
     inventory = commands.add_parser(
         "inventory", help="collect bounded, read-only provider metadata"
@@ -486,6 +499,25 @@ def _execute(arguments: argparse.Namespace) -> int:
             print(f"issued at: {result['issued_at']}")
             print(f"receipt digest: {result['receipt_digest']}")
         return 0 if result["closure_state"] == "CLOSED" else 4
+
+    if arguments.command == "readiness":
+        result = assess_readiness(arguments.provider)
+        if arguments.json:
+            _emit_json(result)
+        else:
+            print(f"readiness: {result['status']}")
+            for provider in result["providers"]:
+                print(f"{provider['provider']}: {provider['status']}")
+                if provider["status"] == "NOT_READY":
+                    print(f"  error: {provider['error']}")
+                    continue
+                print(f"  mutation: {provider['mutation_identity']}")
+                print(f"  observer: {provider['observer_identity']}")
+                for check in provider["checks"]:
+                    print(f"  check: {check}")
+                for limitation in provider["limitations"]:
+                    print(f"  limitation: {limitation}")
+        return 0 if result["status"] == "READY" else 5
 
     if arguments.command == "inventory":
         if arguments.provider == "github":
