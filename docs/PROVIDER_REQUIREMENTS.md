@@ -9,7 +9,7 @@ On a known-clean machine, set the credentials for the providers in scope and
 run:
 
 ```bash
-closurectl readiness --provider github --provider npm --provider aws
+closurectl readiness --provider github --provider npm
 ```
 
 This read-only preflight authenticates both identities, verifies their required
@@ -54,31 +54,3 @@ The recovery credential must remain valid after the exact mutation token is
 revoked and must be able to list token metadata. Never pass an OTP on the
 command line. The release drill pins npm 11.18.0 and waits the full documented
 propagation safety window before observation.
-
-## AWS
-
-Use two AWS CLI v2 profiles resolving to different STS principals in the exact
-target account. The mutation principal needs:
-
-```json
-{
-  "Effect": "Allow",
-  "Action": [
-    "iam:GetRole",
-    "iam:GetRolePolicy",
-    "iam:PutRolePolicy"
-  ],
-  "Resource": "arn:aws:iam::123456789012:role/ExactRoleName"
-}
-```
-
-The observer needs only `iam:GetRole` and `iam:GetRolePolicy` on that role.
-`sts:AssumeRole` is needed by the disposable lab mutation role solely to create
-pre-cutoff and post-cutoff canary sessions; closurectl itself does not call it.
-Neither identity needs `iam:DeleteRolePolicy`, and closurectl has no rollback
-operation.
-
-AWS CLI v2 must provide `sts get-caller-identity`, `iam get-role`,
-`iam get-role-policy`, and `iam put-role-policy`. Only ordinary roles in the
-standard `aws` partition are executable. See
-[`AWS_ROLE_SESSIONS.md`](AWS_ROLE_SESSIONS.md) for the exact policy binding.

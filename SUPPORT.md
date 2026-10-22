@@ -22,7 +22,7 @@ for sanitized installation, compatibility, or workflow questions. The project
 does not provide emergency incident-response services, recovery credentials,
 provider account support, legal advice, or a guarantee of response time.
 
-Provider outages and account recovery must be escalated to GitHub, npm, or AWS
+Provider outages and account recovery must be escalated to GitHub or npm
 through their own support channels.
 
 Only releases and platforms listed in

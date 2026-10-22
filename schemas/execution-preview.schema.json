@@ -60,7 +60,6 @@
       "properties": {
         "provider": {
           "enum": [
-            "aws",
             "github",
             "npm"
           ]
@@ -69,8 +68,7 @@
           "enum": [
             "disable_workflow",
             "cancel_run",
-            "revoke_token",
-            "revoke_role_sessions"
+            "revoke_token"
           ]
         },
         "resource_uri": {
@@ -89,8 +87,7 @@
           "enum": [
             "workflow",
             "run",
-            "token",
-            "role"
+            "token"
           ]
         },
         "resource_id": {
@@ -99,92 +96,9 @@
         }
       }
     },
-    "awsResource": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "role",
-        "policy_name",
-        "operation_id",
-        "planned_cutoff",
-        "planned_policy_digest"
-      ],
-      "properties": {
-        "role": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "name",
-            "arn",
-            "path",
-            "role_id",
-            "max_session_duration"
-          ],
-          "properties": {
-            "name": {
-              "type": "string",
-              "minLength": 1
-            },
-            "arn": {
-              "type": "string",
-              "pattern": "^arn:aws:iam::[0-9]{12}:role/"
-            },
-            "path": {
-              "type": "string",
-              "pattern": "^/"
-            },
-            "role_id": {
-              "type": "string",
-              "minLength": 1
-            },
-            "max_session_duration": {
-              "type": "integer",
-              "minimum": 3600,
-              "maximum": 43200
-            }
-          }
-        },
-        "policy_name": {
-          "type": "string",
-          "pattern": "^ClosureCtlRevokeOlderSessions-[a-f0-9]{32}$"
-        },
-        "operation_id": {
-          "type": "string",
-          "pattern": "^[a-f0-9]{32}$"
-        },
-        "planned_cutoff": {
-          "type": "string",
-          "format": "date-time"
-        },
-        "planned_policy_digest": {
-          "$ref": "#/$defs/digest"
-        }
-      }
-    },
     "action": {
       "type": "object",
       "additionalProperties": false,
-      "allOf": [
-        {
-          "if": {
-            "properties": {
-              "provider": {
-                "const": "aws"
-              }
-            },
-            "required": [
-              "provider"
-            ]
-          },
-          "then": {
-            "properties": {
-              "resource": {
-                "$ref": "#/$defs/awsResource"
-              }
-            }
-          }
-        }
-      ],
       "required": [
         "action_id",
         "edge_id",
@@ -212,7 +126,6 @@
         },
         "provider": {
           "enum": [
-            "aws",
             "github",
             "npm"
           ]
@@ -221,8 +134,7 @@
           "enum": [
             "disable_workflow",
             "cancel_run",
-            "revoke_token",
-            "revoke_role_sessions"
+            "revoke_token"
           ]
         },
         "phase": {

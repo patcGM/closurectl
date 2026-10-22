@@ -106,56 +106,11 @@ def npm_inventory() -> dict:
     }
 
 
-def aws_inventory() -> dict:
-    return {
-        "schema_version": "1",
-        "adapter": "aws-iam-read-only",
-        "collected_at": "2026-10-21T12:01:30Z",
-        "credential_handle": "aws-profile:observer",
-        "subject": {
-            "account": "123456789012",
-            "arn": "arn:aws:iam::123456789012:user/observer",
-            "user_id": "observer",
-        },
-        "partition": "aws",
-        "roles": [
-            {
-                "name": "ProductionDeployer",
-                "role_id": "AROAEXAMPLEPRODUCTION",
-                "arn": "arn:aws:iam::123456789012:role/ProductionDeployer",
-                "path": "/",
-                "service_linked": False,
-                "max_session_duration": 3600,
-                "created_at": "2026-10-01T00:00:00Z",
-                "last_used_at": "2026-10-21T11:00:00Z",
-                "inline_policy_names": [],
-                "attached_policies": [],
-                "github_oidc_trust": [
-                    {
-                        "providers": [
-                            (
-                                "arn:aws:iam::123456789012:oidc-provider/"
-                                "token.actions.githubusercontent.com"
-                            )
-                        ],
-                        "conditions": {
-                            "StringLike:token.actions.githubusercontent.com:sub": [
-                                "repo:example/project:*"
-                            ]
-                        },
-                    }
-                ],
-            }
-        ],
-        "limitations": ["explicit roles only"],
-    }
-
-
 class IncidentDraftTests(unittest.TestCase):
     def test_selected_inventory_paths_build_an_executable_plan(self) -> None:
         draft = create_incident_draft(
             "Compromised release",
-            [github_inventory(), npm_inventory(), aws_inventory()],
+            [github_inventory(), npm_inventory()],
             now=lambda: "2026-10-21T12:02:00Z",
         )
         candidate_ids = {item["candidate_id"] for item in draft["candidates"]}
@@ -163,14 +118,6 @@ class IncidentDraftTests(unittest.TestCase):
         self.assertIn("github:example/project:cancel-run:99", candidate_ids)
         self.assertIn("github:example/project:deploy-key:5", candidate_ids)
         self.assertIn("npm:registry.npmjs.org:revoke-token:token-id-123", candidate_ids)
-        self.assertIn(
-            "aws:123456789012:revoke-role-sessions:ProductionDeployer",
-            candidate_ids,
-        )
-        self.assertIn(
-            "aws:123456789012:github-oidc-trust:ProductionDeployer:1",
-            candidate_ids,
-        )
         self.assertNotIn("github:example/project:disable-workflow:43", candidate_ids)
         for candidate in draft["candidates"]:
             self.assertRegex(candidate["provenance"]["source_digest"], r"^[a-f0-9]{64}$")
@@ -187,7 +134,6 @@ class IncidentDraftTests(unittest.TestCase):
             "github:example/project:disable-workflow:42",
             "github:example/project:cancel-run:99",
             "npm:registry.npmjs.org:revoke-token:token-id-123",
-            "aws:123456789012:revoke-role-sessions:ProductionDeployer",
         ]
         graph = build_authority_graph(draft, selected, draft["draft_digest"])
         plan = plan_closure(graph)
@@ -198,7 +144,6 @@ class IncidentDraftTests(unittest.TestCase):
                 ("github", "disable_workflow"),
                 ("github", "cancel_run"),
                 ("npm", "revoke_token"),
-                ("aws", "revoke_role_sessions"),
             },
         )
 

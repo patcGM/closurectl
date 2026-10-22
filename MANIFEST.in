@@ -8,7 +8,6 @@ include ROADMAP.md
 include SECURITY.md
 include SUPPORT.md
 recursive-include docs *.md
-recursive-include labs *.yml
 recursive-include packaging *.py
 recursive-include requirements *.txt
 recursive-include schemas *.json

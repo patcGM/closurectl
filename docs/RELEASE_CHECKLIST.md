@@ -23,18 +23,12 @@
   disposable npm account.
 - Configure `LAB_NPM_OTP` only for the destructive run and remove it
   immediately afterward.
-- Configure `LAB_AWS_MUTATION_ROLE_ARN` and `LAB_AWS_OBSERVER_ROLE_ARN` as
-  different disposable IAM principals trusted only through GitHub OIDC. The
-  mutation role may put/get one unique preview-bound containment policy on one
-  lab role; the observer role is read-only.
-- Configure `LAB_AWS_ACCOUNT_ID` and `LAB_AWS_TARGET_ROLE_NAME`; the destructive
-  job requires exact equality and a `closurectl-lab-*` role name.
 
 ## Candidate validation
 
 - Finalize `1.0.0`, the Production/Stable classifier, release notes, and every
   tracked file first. All following checks must run on that unchanged commit.
-- Run Ruff, actionlint, cfn-lint, Bandit, pip-audit, coverage, schemas, package
+- Run Ruff, actionlint, Bandit, pip-audit, coverage, schemas, package
   builds, wheel/sdist clean-install smoke tests, and every PyInstaller smoke.
 - Confirm the full `ci.yml` workflow is successful on the exact candidate SHA.
 - Obtain an independent approval from `test2GM` on the associated pull request;
@@ -45,17 +39,10 @@
 - Merge the reviewed candidate to `main`, then run
   `.github/workflows/provider-lab.yml` on that exact merge commit against a
   disposable GitHub repository and npm package/token.
-- Run `.github/workflows/aws-provider-lab.yml` on the same commit against one
-  exact disposable standard-partition IAM role. Review the account, immutable
-  `RoleId`, unique policy name, policy digest, both STS identities, and
-  role-wide cutoff effect. Require the real old-session canary to receive
-  `AccessDenied` and the post-cutoff session to retain access.
-- For GitHub/npm, download and inspect the preview artifact while the
+- Download and inspect the preview artifact while the
   destructive job waits for `provider-lab` approval; approve within the
-  15-minute TTL or rerun. For AWS, inspect the exact preview before approval;
-  the old canary is created after approval but before the preview-bound cutoff,
-  and the unchanged preview is retained with the final evidence.
-- Confirm both provider-lab receipts are `CLOSED`, every break-glass identity
+  15-minute TTL or rerun.
+- Confirm the provider-lab receipt is `CLOSED`, every break-glass identity
   still works, and uploaded artifacts contain no credential material.
 - Confirm npm CLI 11.18.0 was installed by the drill and compare provider
   grants with `docs/PROVIDER_REQUIREMENTS.md`.
@@ -73,8 +60,7 @@
   file through `body_path` and does not generate mutable release notes.
 - Approve the protected `release` environment only after the workflow confirms
   the tag, version, `main` ancestry, full CI, independent `test2GM` approval,
-  and successful GitHub/npm and AWS provider-lab runs on the exact tagged
-  commit.
+  and a successful GitHub/npm provider-lab run on the exact tagged commit.
 - Verify wheel, sdist, Windows/Linux/macOS binaries, SBOM, checksums, and GitHub
   artifact attestations from a clean machine.
 - Use a stable `vX.Y.Z` tag only when every provider drill and review above is

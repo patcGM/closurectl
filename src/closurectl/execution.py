@@ -148,14 +148,6 @@ def validate_execution_preview(
         target = parse_execution_target(expected)
         if actual["target_details"] != target.to_dict():
             raise ValidationError("preview target details do not match the plan")
-        if expected.provider == "aws":
-            planned_cutoff = actual["resource"].get("planned_cutoff")
-            cutoff = parse_rfc3339(planned_cutoff, "preview AWS planned_cutoff")
-            cutoff_delay = (cutoff - created).total_seconds()
-            if not PREVIEW_TTL_SECONDS + 15 <= cutoff_delay <= PREVIEW_TTL_SECONDS + 60:
-                raise ValidationError(
-                    "AWS planned cutoff must be 15 to 60 seconds after preview expiry"
-                )
     return validated
 
 

@@ -50,7 +50,7 @@ class PlannerTests(unittest.TestCase):
             [
                 "github-can-mint-oidc",
                 "queued-deploy-can-commit",
-                "aws-session-can-deploy",
+                "cloud-session-can-deploy",
                 "npm-can-publish",
                 "github-repository-access",
             ],

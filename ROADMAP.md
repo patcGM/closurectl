@@ -34,18 +34,14 @@ The roadmap is ordered by safety prerequisites rather than feature count.
 Mutation and observation remain separate commands and credentials. No accepted
 provider request is used as closure evidence.
 
-## 0.3 — guided incident response and AWS containment
+## 0.3 — guided incident response and release readiness
 
 - [x] provider inventory → human-confirmed incident draft
 - [x] interactive incident wizard and exact non-interactive candidate selection
 - [x] deterministic offline HTML report and execution timeline
-- [x] allow-listed AWS IAM role and GitHub OIDC trust inventory
-- [x] unique preview-bound AWS role-session deny with independent observation
-- [x] protected disposable AWS/OIDC provider-lab workflow
 - [x] Linux arm64 and native macOS arm64/x86-64 release matrices
 - [ ] successful disposable GitHub/npm drill on the 1.0.0 release commit
-- [ ] successful disposable AWS role-session drill on the release commit
-- [ ] independent 1.0.0 review from `test2GM`
+- [x] independent 1.0.0 review from `test2GM`
 - [ ] containment SLO measurement
 - [x] clean-machine recovery readiness checks
 - [x] retain exact preview/confirm controls without a hidden feature flag
@@ -62,11 +58,13 @@ Live mutations are not assigned a release until the project has:
 - a reviewed rollback story;
 - two-person review for every destructive provider operation.
 
-The GitHub Actions, npm token, and AWS role-session adapters remain attended
-and exact-target only. AWS writes one unique
-`ClosureCtlRevokeOlderSessions-*` inline policy bound to the exact role ID and
-confirmed preview, and release publication remains gated until its disposable
-live drill passes.
+The GitHub Actions and npm token adapters remain attended and exact-target
+only. AWS support is deferred until the project has access to an authorized
+disposable account and can restore all of the following together:
+
+- [ ] allow-listed IAM role and GitHub OIDC trust inventory;
+- [ ] unique preview-bound role-session denial with independent observation;
+- [ ] protected live old-session/new-session drill on every release commit.
 
 No generic “revoke everything” command is planned.
 

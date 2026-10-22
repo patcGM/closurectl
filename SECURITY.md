@@ -32,8 +32,6 @@ coordinate disclosure based on impact and fix availability.
 - preview/confirmation substitution or stale-preview execution;
 - repeated mutation after a timeout or process crash;
 - observer credentials that are not independent of the mutation identity;
-- AWS role-policy substitution, stale cutoffs, or mutation/observer profiles
-  that resolve to the same principal;
 - unescaped provider metadata in generated HTML reports;
 - minimum-cut errors that incorrectly report `CLOSED`;
 - key overwrite or unsafe private-key handling;
@@ -51,19 +49,12 @@ closurectl demo --dir closurectl-demo
 
 ## Security posture
 
-Version 1.0.0 has attended live adapters for exact GitHub Actions workflow/run,
-npm token, and AWS IAM role targets. Execution still refuses to proceed without
-a fresh preview digest, independent observer/recovery credentials, and a new
-journal path. Inventory and observation commands remain read-only.
+Version 1.0.0 has attended live adapters for exact GitHub Actions workflow/run
+and npm token targets. Execution still refuses to proceed without a fresh
+preview digest, independent observer/recovery credentials, and a new journal
+path. Inventory and observation commands remain read-only.
 
 The adapters are intended for attended incident response only. Do not grant
 broader permissions than the exact disposable or incident scope requires. npm
 revocation may take up to one hour to propagate, and a provider acceptance
 response is never treated as closure evidence.
-
-The AWS adapter supports only the standard AWS partition, exact IAM role
-targets, different STS principals for mutation and observation, and the
-unique preview-bound `ClosureCtlRevokeOlderSessions-*` policy. It requires the
-same immutable IAM `RoleId` at apply and observation time and never overwrites
-`AWSRevokeOlderSessions`. Release publication is blocked until the protected
-AWS provider lab passes on the exact tagged commit.

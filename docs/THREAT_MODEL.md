@@ -32,8 +32,6 @@ Version 1.0.0 assumes:
 - planning and signing happen on a known-clean machine;
 - the operator has an independent recovery identity;
 - provider control planes and documented read-only APIs are honest;
-- AWS CLI profiles resolve to the principals shown by STS and IAM returns the
-  effective role policy state;
 - graph authors correctly declare relevant roots, paths, sinks, and
   enforcement points;
 - Ed25519 private keys remain secret;
@@ -100,11 +98,6 @@ plan actions remain descriptive metadata.
 12. **Mutation is not observation.** Only the separate observer identity can
     produce provider evidence v2. An accepted mutation never becomes
     `VERIFIED_CLOSED` directly.
-13. **AWS revocation is role-wide, unique, and time-bounded.** The AWS executor
-    creates one preview-bound `ClosureCtlRevokeOlderSessions-*` inline policy
-    on the exact previewed IAM `RoleId`; it never overwrites
-    `AWSRevokeOlderSessions`. Resume never calls `PutRolePolicy`, and evidence
-    requires the exact name, cutoff, and policy digest after propagation.
 
 ## Closure states
 
@@ -126,32 +119,17 @@ The release permits only:
 - disabling one exact GitHub Actions workflow;
 - cancelling one exact GitHub Actions run;
 - revoking one exact npm token ID at `registry.npmjs.org`;
-- creating one unique preview-bound deny policy on one exact
-  standard-partition IAM role.
 
 GitHub mutation and observation must use different GitHub accounts. npm
 mutation and recovery must use different userconfig files for the same account,
 with different credential material. The target token must be visible through
 the recovery config before mutation.
 
-AWS mutation and observation must use different CLI profiles that resolve
-through STS to different principals in the target account. Service-linked
-roles, IAM Identity Center managed roles, non-standard AWS partitions, trust
-policy rewrites, and individual-session targeting are refused. The deny cutoff
-is fixed by the confirmed preview and affects every role session issued before
-it. A separate observer must still see the exact preview-bound policy after the
-five-minute propagation window before evidence can be `VERIFIED_CLOSED`.
-
 GitHub workflow disable can be rolled back manually with the exact workflow
 enable API after the incident is understood. Run cancellation and npm token
 revocation are irreversible; the operator creates a new run or token instead.
 `closurectl` never performs automatic rollback because concurrent attacker
 activity may make it unsafe.
-
-For AWS, rollback means reviewing whether the incident is contained and then
-manually deleting the exact `ClosureCtlRevokeOlderSessions-*` policy recorded
-by the receipt. Automatic rollback is especially unsafe because it can
-re-enable attacker sessions that have not yet expired.
 
 Every release still requires successful protected disposable-provider drills
 on the exact release commit, two-person review, and maintained

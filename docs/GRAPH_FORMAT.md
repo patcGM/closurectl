@@ -75,7 +75,7 @@ A non-revocable edge omits `enforcement`:
 {
   "id": "authority-copied-before-response",
   "source": "incident:authority-epoch",
-  "target": "aws:existing-session",
+  "target": "cloud:existing-session",
   "kind": "derived_before_response",
   "label": "The cloud session already exists",
   "revocable": false,
@@ -95,14 +95,11 @@ graphs stay valid. `execute`, however, rejects every contract except:
 - `github` / `cancel_run` /
   `github://OWNER/REPOSITORY/actions/runs/NUMERIC_ID`;
 - `npm` / `revoke_token` /
-  `npm://registry.npmjs.org/tokens/FULL_TOKEN_ID`;
-- `aws` / `revoke_role_sessions` /
-  `aws://ACCOUNT_ID/iam/roles/ROLE_NAME`.
+  `npm://registry.npmjs.org/tokens/FULL_TOKEN_ID`.
 
-The required phases are `stop_minting`, `cancel_pending`, `revoke_roots`, and
-`revoke_descendants` respectively. Human-readable aliases, workflow paths,
-partial token keys, and targets with credentials, query strings, or fragments
-are never executable.
+The required phases are `stop_minting`, `cancel_pending`, and `revoke_roots`
+respectively. Human-readable aliases, workflow paths, partial token keys, and
+targets with credentials, query strings, or fragments are never executable.
 
 `closurectl incident draft` can propose these edges from bounded provider
 inventories. A proposal is not authority evidence: `incident wizard` or
