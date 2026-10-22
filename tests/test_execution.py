@@ -185,6 +185,22 @@ class ExecutionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValidationError, "GitHub targets"):
             parse_execution_target(invalid)
 
+    def test_github_owner_and_repository_casing_is_preserved(self) -> None:
+        action = PlanAction(
+            action_id="close:mixed-case",
+            edge_id="mixed-case",
+            provider="github",
+            operation="disable_workflow",
+            target="github://patcGM/ClosureCtl-Lab/actions/workflows/42",
+            phase="stop_minting",
+            cost=1,
+            reason="test canonical GitHub casing",
+        )
+        target = parse_execution_target(action)
+        self.assertEqual(target.account, "patcGM")
+        self.assertEqual(target.repository, "patcGM/ClosureCtl-Lab")
+        self.assertEqual(target.resource_uri, action.target)
+
     def test_targets_reject_ports_noncanonical_paths_and_option_tokens(self) -> None:
         base = self.plan.actions[0]
         invalid_targets = (

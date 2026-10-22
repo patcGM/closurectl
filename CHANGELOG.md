@@ -9,6 +9,8 @@ Versioning after the first public release.
 
 - strict JSON, timestamp, target URI, provider-output, pagination, and process
   output bounds with cross-platform Unicode handling;
+- canonical GitHub execution targets preserve provider-returned owner and
+  repository casing instead of lowercasing mixed-case account names;
 - strict inventory runtime schemas, source-digest/JSON-path provenance,
   freshness enforcement, conflict rejection, and an overwrite-safe TTY wizard;
 - secret-free normalization for both legacy and granular npm token-list

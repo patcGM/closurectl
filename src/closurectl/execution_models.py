@@ -100,7 +100,7 @@ def parse_execution_target(action: PlanAction) -> ExecutionTarget:
             raise ValidationError(
                 "GitHub targets must use github://OWNER/REPO/actions/{workflows|runs}/NUMERIC_ID"
             )
-        owner = parsed.hostname
+        owner = parsed.netloc
         parts = [urllib.parse.unquote(part) for part in parsed.path.split("/") if part]
         if (
             len(parts) != 4
