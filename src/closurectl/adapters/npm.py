@@ -143,9 +143,42 @@ def _safe_token_metadata(raw: Any) -> list[dict[str, Any]]:
         raise AdapterError("npm credential metadata exceeded the safety limit")
     if not all(isinstance(item, dict) for item in candidates):
         raise AdapterError("npm credential metadata contains a malformed item")
-    if not all(isinstance(item.get("readonly"), bool) for item in candidates):
-        raise AdapterError("npm credential metadata is missing a readonly boolean")
-    return [{key: item.get(key) for key in sorted(allowed) if key in item} for item in candidates]
+    normalized: list[dict[str, Any]] = []
+    for item in candidates:
+        if not isinstance(item.get("id"), str) or not item["id"]:
+            raise AdapterError("npm credential metadata is missing a token ID")
+        if isinstance(item.get("readonly"), bool):
+            normalized.append({key: item[key] for key in sorted(allowed) if key in item})
+            continue
+
+        permissions = item.get("permissions")
+        bypass_2fa = item.get("bypass_2fa")
+        if not isinstance(permissions, list) or not isinstance(bypass_2fa, bool):
+            raise AdapterError("npm credential metadata has an unsupported token shape")
+        package_actions: list[str] = []
+        for permission in permissions:
+            if (
+                not isinstance(permission, dict)
+                or set(permission) != {"name", "action"}
+                or not isinstance(permission.get("name"), str)
+                or permission.get("action") not in {"read", "write"}
+            ):
+                raise AdapterError("npm granular token permission metadata is invalid")
+            if permission["name"] == "package":
+                package_actions.append(permission["action"])
+        safe = {
+            key: item[key]
+            for key in ("id", "name", "created", "updated")
+            if isinstance(item.get(key), str) and item[key]
+        }
+        safe["readonly"] = all(action == "read" for action in package_actions)
+        safe["automation"] = bypass_2fa
+        cidr = item.get("cidr", [])
+        if not isinstance(cidr, list) or not all(isinstance(value, str) for value in cidr):
+            raise AdapterError("npm granular token CIDR metadata is invalid")
+        safe["cidr_whitelist"] = cidr
+        normalized.append(safe)
+    return normalized
 
 
 def require_supported_npm_version() -> None:

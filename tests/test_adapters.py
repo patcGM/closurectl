@@ -20,6 +20,7 @@ from closurectl.adapters.npm import (
     MAX_OUTPUT_BYTES,
     _registry_url,
     _run_npm,
+    _safe_token_metadata,
     collect_npm_inventory,
     require_supported_npm_version,
 )
@@ -213,6 +214,45 @@ class AdapterTests(unittest.TestCase):
         self.assertNotIn("npm_partial_key", rendered)
         self.assertNotIn("plaintext-should-never-appear", rendered)
         self.assertIn("credential-id", rendered)
+
+    def test_npm_granular_tokens_are_normalized_without_token_values(self) -> None:
+        metadata = _safe_token_metadata(
+            [
+                {
+                    "id": "granular-read",
+                    "name": "read-only",
+                    "key": "npm_partial_key",
+                    "token": "plaintext-should-never-appear",
+                    "created": "2026-10-22T11:00:00Z",
+                    "updated": "2026-10-22T11:00:00Z",
+                    "expiry": "2026-10-29T11:00:00Z",
+                    "bypass_2fa": False,
+                    "cidr": [],
+                    "permissions": [{"name": "package", "action": "read"}],
+                    "scopes": [{"name": None, "type": "package"}],
+                },
+                {
+                    "id": "granular-write",
+                    "name": "publisher",
+                    "key": "another_partial_key",
+                    "token": "another-plaintext-value",
+                    "bypass_2fa": True,
+                    "cidr": ["192.0.2.0/24"],
+                    "permissions": [{"name": "package", "action": "write"}],
+                    "scopes": [{"name": "@example", "type": "scope"}],
+                },
+            ]
+        )
+        self.assertTrue(metadata[0]["readonly"])
+        self.assertFalse(metadata[0]["automation"])
+        self.assertFalse(metadata[1]["readonly"])
+        self.assertTrue(metadata[1]["automation"])
+        self.assertEqual(metadata[1]["cidr_whitelist"], ["192.0.2.0/24"])
+        rendered = json.dumps(metadata)
+        self.assertNotIn("npm_partial_key", rendered)
+        self.assertNotIn("plaintext", rendered)
+        self.assertNotIn("permissions", rendered)
+        self.assertNotIn("scopes", rendered)
 
     def test_npm_registry_rejects_invalid_ports(self) -> None:
         for registry in (
