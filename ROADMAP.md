@@ -70,6 +70,14 @@ live drill passes.
 
 No generic “revoke everything” command is planned.
 
+## 1.x evidence follow-up
+
+- [ ] verify inventory → draft → graph provenance from the original inventory
+  artifacts without changing authority graph v1;
+- [ ] introduce additive evidence/receipt schemas that sign the confirmed
+  preview digest and execution-journal head;
+- [ ] package verified artifacts into a portable, signed incident case bundle.
+
 ## Non-goals
 
 - malware removal;

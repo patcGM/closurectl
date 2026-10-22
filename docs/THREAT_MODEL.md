@@ -85,8 +85,10 @@ plan actions remain descriptive metadata.
    the plan from that graph instead of trusting a supplied action list.
 7. **Signing is not provider attestation.** An Ed25519 signature establishes
    artifact integrity and signer possession, not the truth of an observation.
-8. **Existing keys are never overwritten.** Key generation fails closed when
-   either destination already exists.
+8. **Inputs and existing keys are never overwritten.** Key generation and the
+   demo fail closed on existing destinations. Artifact-producing commands
+   reject output paths that resolve to a declared input artifact or active
+   provider config, including hard-link and symlink aliases.
 9. **Mutation requires a bound preview.** Live execution requires a fresh
    preview digest that binds the graph, plan, immutable target, provider state,
    mutation identity, and independent observer identity.
