@@ -1,5 +1,5 @@
 # Reproducible build/test toolchain for closurectl releases.
-actionlint-py==1.7.7.24
+actionlint-py==1.7.12.25
 altgraph==0.17.5
 bandit==1.9.4
 build==1.6.1
