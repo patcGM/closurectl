@@ -15,7 +15,7 @@ pyinstaller-hooks-contrib==2026.7
 pip-audit==2.10.1
 pycparser==3.11
 pywin32-ctypes==0.2.3
-ruff==0.17.1
+ruff==0.17.2
 setuptools==84.2.1
 twine==7.0.0
 wheel==0.48.0
